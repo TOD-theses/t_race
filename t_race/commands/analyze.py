@@ -2,6 +2,7 @@ from argparse import ArgumentParser, Namespace
 import json
 import os
 from pathlib import Path
+import traceback
 from typing import Iterable, Sequence
 
 from traces_analyzer.loader.directory_loader import DirectoryLoader
@@ -58,7 +59,7 @@ def analyze(args: Namespace):
         _analyze,
         trace_dirs_with_output_path,
         max_workers=args.max_workers,
-        chunksize=10,
+        chunksize=1,
     )
 
 
@@ -73,10 +74,10 @@ def _analyze(args: tuple[Path, Path]):
         try:
             evaluations = analyze_attack(bundle)
             save_evaluations(evaluations, results_dir / f"{bundle.id}.json")
-        except Exception as e:
-            print(e)
+        except Exception:
+            msg = traceback.format_exc()
             with open(out_path, "w") as f:
-                json.dump({"exception": str(e)}, f)
+                json.dump({"exception": msg}, f)
 
 
 def analyze_attack(bundle: PotentialAttack):
