@@ -1,5 +1,6 @@
 tqdm==4.66.1
 typing_extensions==4.10.0
 requests==2.31.0
-traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer@e4fc806b7bfde62950041c22a5b3fe0a1129e877
-tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@26feb6b2aca839a0e76a24ce083a7542a0f93c72
+# TODO: use specific commits
+traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer
+tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner
