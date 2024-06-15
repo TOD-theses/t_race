@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 from typing import Iterable, Sequence
 
-from tqdm import tqdm
+from tqdm.contrib.concurrent import process_map
 
 
 def init_parser_trace(parser: ArgumentParser):
@@ -31,10 +31,19 @@ def trace(args: Namespace):
 
     transactions = load_transactions(transactions_csv_path)
 
-    for tx_a, tx_b in tqdm(transactions):
-        tod_dir = traces_dir / f"{tx_a}_{tx_b}"
-        tod_dir.mkdir()
-        run_replayer(args.provider, Path("revm-replayer"), (tx_a, tx_b), tod_dir)
+    process_inputs = [
+        ((tx_a, tx_b), traces_dir / f"{tx_a}_{tx_b}", args.provider)
+        for tx_a, tx_b in transactions
+    ]
+
+    process_map(create_trace, process_inputs, max_workers=args.max_workers, chunksize=1)
+
+
+def create_trace(args: tuple[tuple[str, str], Path, str]):
+    transactions, tod_dir, provider = args
+
+    tod_dir.mkdir()
+    run_replayer(provider, Path("revm-replayer"), transactions, tod_dir)
 
 
 def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
