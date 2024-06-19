@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from importlib.metadata import version
 import json
 import os
 from pathlib import Path
@@ -31,6 +32,11 @@ from tqdm.contrib.concurrent import process_map
 
 
 def init_parser_analyze(parser: ArgumentParser):
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="traces_analyzer " + version("traces_analyzer"),
+    )
     parser.add_argument(
         "--traces-path",
         type=Path,

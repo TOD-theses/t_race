@@ -1,6 +1,7 @@
 """CLI interface for t_race project."""
 
 from argparse import ArgumentParser
+from importlib.metadata import version
 from os import cpu_count
 from pathlib import Path
 
@@ -11,6 +12,9 @@ from t_race.commands.trace import init_parser_trace
 
 def main():
     parser = ArgumentParser(description="Find and analyze TOD transactions in Ethereum")
+    parser.add_argument(
+        "--version", action="version", version="%(prog)s " + version("t_race")
+    )
     parser.add_argument(
         "--provider",
         type=str,

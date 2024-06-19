@@ -2,6 +2,7 @@ from argparse import ArgumentParser, Namespace
 import argparse
 import csv
 from dataclasses import dataclass
+from importlib.metadata import version
 from pathlib import Path
 
 from tod_attack_miner import Miner
@@ -32,6 +33,11 @@ def block_range_type(input: str) -> BlockRange:
 
 
 def init_parser_mine(parser: ArgumentParser):
+    parser.add_argument(
+        "--version",
+        action="version",
+        version="tod_attack_miner " + version("tod_attack_miner"),
+    )
     parser.add_argument(
         "--blocks",
         type=block_range_type,

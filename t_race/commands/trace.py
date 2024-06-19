@@ -6,8 +6,15 @@ from typing import Iterable, Sequence
 
 from tqdm.contrib.concurrent import process_map
 
+REVM_REPLAYER_PATH = Path("revm-replayer")
+
 
 def init_parser_trace(parser: ArgumentParser):
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"revm-replayer <unknown - run '{REVM_REPLAYER_PATH} --version' instead>",
+    )
     parser.add_argument(
         "--transactions-csv",
         type=Path,
@@ -43,7 +50,7 @@ def create_trace(args: tuple[tuple[str, str], Path, str]):
     transactions, tod_dir, provider = args
 
     tod_dir.mkdir()
-    run_replayer(provider, Path("revm-replayer"), transactions, tod_dir)
+    run_replayer(provider, REVM_REPLAYER_PATH, transactions, tod_dir)
 
 
 def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
