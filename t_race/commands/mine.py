@@ -49,6 +49,12 @@ def init_parser_mine(parser: ArgumentParser):
         required=True,
     )
     parser.add_argument(
+        "--window-size",
+        type=int,
+        default=None,
+        help="If passed, filter TOD candidates that are {window-size} or more blocks apart",
+    )
+    parser.add_argument(
         "--output-path",
         type=Path,
         default=Path("mined_tods.csv"),
@@ -84,7 +90,7 @@ def mine(args: Namespace):
         miner.find_conflicts()
         print(f"Found {miner.count_candidates()} TOD candidates")
         print("Filtering TOD candidates...", end="\r")
-        miner.filter_candidates()
+        miner.filter_candidates(window_size=args.window_size)
         print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
         candidates = miner.get_candidates()
