@@ -123,9 +123,20 @@ def mine(
 
         with time_tracker.step("mine", "save_candidates"):
             candidates = miner.get_candidates()
+            for c in candidates:
+                c["types"] = "|".join(c["types"])  # type: ignore
 
             with open(output_path, "w", newline="") as f:
-                writer = csv.writer(f)
+                writer = csv.DictWriter(
+                    f,
+                    fieldnames=[
+                        "tx_write_hash",
+                        "tx_access_hash",
+                        "block_dist",
+                        "types",
+                    ],
+                )
+                writer.writeheader()
                 writer.writerows(candidates)
 
             print(f"Wrote {len(candidates)} TODs to {output_path}")
