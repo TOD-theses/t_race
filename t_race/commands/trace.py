@@ -1,10 +1,11 @@
 from argparse import ArgumentParser, Namespace
 import csv
+from multiprocessing import Pool
 from pathlib import Path
 import subprocess
 from typing import Iterable, Sequence
 
-from tqdm.contrib.concurrent import process_map
+from tqdm import tqdm
 
 REVM_REPLAYER_PATH = Path("revm-replayer")
 
@@ -43,7 +44,12 @@ def trace(args: Namespace):
         for tx_a, tx_b in transactions
     ]
 
-    process_map(create_trace, process_inputs, max_workers=args.max_workers, chunksize=1)
+    with Pool(args.max_workers) as p:
+        for _ in tqdm(
+            p.imap_unordered(create_trace, process_inputs, chunksize=1),
+            total=len(process_inputs),
+        ):
+            pass
 
 
 def create_trace(args: tuple[tuple[str, str], Path, str]):
@@ -51,6 +57,7 @@ def create_trace(args: tuple[tuple[str, str], Path, str]):
 
     tod_dir.mkdir()
     run_replayer(provider, REVM_REPLAYER_PATH, transactions, tod_dir)
+    return f"Created {transactions}"
 
 
 def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:

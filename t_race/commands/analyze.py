@@ -1,11 +1,13 @@
 from argparse import ArgumentParser, Namespace
 from importlib.metadata import version
 import json
+from multiprocessing import Pool
 import os
 from pathlib import Path
 import traceback
 from typing import Iterable, Sequence
 
+from tqdm import tqdm
 from traces_analyzer.loader.directory_loader import DirectoryLoader
 from traces_analyzer.loader.loader import PotentialAttack
 from traces_analyzer.cli import (
@@ -27,8 +29,6 @@ from traces_analyzer.cli import (
     CALL,
     STATICCALL,
 )
-
-from tqdm.contrib.concurrent import process_map
 
 
 def init_parser_analyze(parser: ArgumentParser):
@@ -59,14 +59,14 @@ def analyze(args: Namespace):
     results_dir.mkdir(exist_ok=True)
 
     trace_dirs = get_trace_dirs(traces_dir)
-    trace_dirs_with_output_path = [(path, results_dir) for path in trace_dirs]
+    process_inputs = [(path, results_dir) for path in trace_dirs]
 
-    process_map(
-        _analyze,
-        trace_dirs_with_output_path,
-        max_workers=args.max_workers,
-        chunksize=1,
-    )
+    with Pool(args.max_workers) as p:
+        for _ in tqdm(
+            p.imap_unordered(_analyze, process_inputs, chunksize=1),
+            total=len(process_inputs),
+        ):
+            pass
 
 
 def get_trace_dirs(traces_dir: Path) -> Sequence[Path]:
