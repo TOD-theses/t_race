@@ -12,6 +12,7 @@ from tod_attack_miner.rpc.rpc import RPC
 from tod_attack_miner.db.db import DB
 
 from t_race.commands.defaults import DEFAULTS
+from t_race.timing.time_tracker import TimeTracker
 
 
 @dataclass
@@ -75,21 +76,23 @@ def init_parser_mine(parser: ArgumentParser):
     parser.set_defaults(func=mine_command)
 
 
-def mine_command(args: Namespace):
+def mine_command(args: Namespace, time_tracker: TimeTracker):
     output_path = args.base_dir / args.output_path
     output_stats_path = args.base_dir / args.output_stats_path
 
     conn_str = f"user={args.postgres_user} password={args.postgres_password} host={args.postgres_host} port={args.postgres_port}"
     print("Connecting to postgres: ", conn_str)
 
-    mine(
-        args.blocks,
-        args.window_size,
-        output_path,
-        output_stats_path,
-        conn_str,
-        args.provider,
-    )
+    with time_tracker.component("mine"):
+        mine(
+            args.blocks,
+            args.window_size,
+            output_path,
+            output_stats_path,
+            conn_str,
+            args.provider,
+            time_tracker,
+        )
 
 
 def mine(
@@ -99,31 +102,39 @@ def mine(
     output_stats_path: Path,
     conn_str: str,
     provider: str,
+    time_tracker: TimeTracker,
 ):
     with psycopg.connect(conn_str) as conn:
         conn._check_connection_ok()
         miner = Miner(RPC(provider), DB(conn))
 
-        miner.fetch(block_range.start, block_range.end)
-        print("Finding TOD candidates...", end="\r")
-        miner.find_conflicts()
-        print(f"Found {miner.count_candidates()} TOD candidates")
-        print("Filtering TOD candidates...", end="\r")
-        miner.filter_candidates(window_size=window_size)
-        print(f"Reduced to {miner.count_candidates()} TOD candidates")
+        with time_tracker.step("mine", "fetch"):
+            miner.fetch(block_range.start, block_range.end)
 
-        candidates = miner.get_candidates()
+        with time_tracker.step("mine", "candidates"):
+            print("Finding TOD candidates...", end="\r")
+            miner.find_conflicts()
+            print(f"Found {miner.count_candidates()} TOD candidates")
 
-        with open(output_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerows(candidates)
+        with time_tracker.step("mine", "filter"):
+            print("Filtering TOD candidates...", end="\r")
+            miner.filter_candidates(window_size=window_size)
+            print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
-        print(f"Wrote {len(candidates)} TODs to {output_path}")
+        with time_tracker.step("mine", "save_candidates"):
+            candidates = miner.get_candidates()
 
-        print("Preparing stats...", end="\r")
-        stats = miner.get_stats()
+            with open(output_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerows(candidates)
 
-        with open(output_stats_path, "w") as f:
-            json.dump(stats, f, indent=2)
+            print(f"Wrote {len(candidates)} TODs to {output_path}")
 
-        print(f"Wrote stats to {output_stats_path}")
+        with time_tracker.step("mine", "stats"):
+            print("Preparing stats...", end="\r")
+            stats = miner.get_stats()
+
+            with open(output_stats_path, "w") as f:
+                json.dump(stats, f, indent=2)
+
+            print(f"Wrote stats to {output_stats_path}")

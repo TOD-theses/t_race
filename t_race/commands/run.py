@@ -11,6 +11,7 @@ from t_race.commands.analyze import AnalyzeArgs, analyze
 from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import block_range_type, mine
 from t_race.commands.trace import TraceArgs, create_trace, load_transactions
+from t_race.timing.time_tracker import TimeTracker
 
 
 def init_parser_run(parser: ArgumentParser):
@@ -36,12 +37,15 @@ def init_parser_run(parser: ArgumentParser):
     parser.set_defaults(func=run_command)
 
 
-def run_command(args: Namespace):
-    run_mining(args)
-    run_trace_analyze(args)
+def run_command(args: Namespace, time_tracker: TimeTracker):
+    with time_tracker.component("mine"):
+        run_mining(args, time_tracker)
+
+    with time_tracker.component("trace_analyze"):
+        run_trace_analyze(args, time_tracker)
 
 
-def run_mining(args: Namespace):
+def run_mining(args: Namespace, time_tracker: TimeTracker):
     output_path = args.base_dir / DEFAULTS.TOD_CANDIDATES_CSV_PATH
     output_stats_path = args.base_dir / DEFAULTS.TOD_MINER_STATS_PATH
 
@@ -54,10 +58,11 @@ def run_mining(args: Namespace):
         output_stats_path,
         conn_str,
         args.provider,
+        time_tracker,
     )
 
 
-def run_trace_analyze(args: Namespace):
+def run_trace_analyze(args: Namespace, time_tracker: TimeTracker):
     tod_candidates_csv_path: Path = args.base_dir / DEFAULTS.TOD_CANDIDATES_CSV_PATH
     results_dir: Path = args.base_dir / DEFAULTS.RESULTS_PATH
     results_dir.mkdir(exist_ok=True)
@@ -72,12 +77,17 @@ def run_trace_analyze(args: Namespace):
     ]
 
     with Pool(args.max_workers) as p:
-        for _ in tqdm(
+        for trace_result, analyze_result in tqdm(
             p.imap_unordered(trace_analyze, process_inputs, chunksize=1),
             desc="Trace and analyze TOD candidates",
             total=len(process_inputs),
         ):
-            pass
+            time_tracker.save_time_step_ms(
+                "trace", trace_result.id, trace_result.elapsed_ms
+            )
+            time_tracker.save_time_step_ms(
+                "analyze", analyze_result.id, analyze_result.elapsed_ms
+            )
 
     traces_dir.rmdir()
 
@@ -96,7 +106,9 @@ def create_process_input(
 def trace_analyze(args: tuple[TraceArgs, AnalyzeArgs]):
     trace_args, analyze_args = args
 
-    create_trace(trace_args)
-    analyze(analyze_args)
+    trace_result = create_trace(trace_args)
+    analyze_result = analyze(analyze_args)
 
     shutil.rmtree(analyze_args.traces_path)
+
+    return trace_result, analyze_result

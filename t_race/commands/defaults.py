@@ -8,3 +8,4 @@ class DEFAULTS:
     TOD_MINER_STATS_PATH = Path("mining_stats.json")
     TRACES_PATH = Path("traces")
     RESULTS_PATH = Path("results")
+    TIMINGS_PATH = Path("timings.csv")

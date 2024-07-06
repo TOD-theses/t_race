@@ -6,9 +6,11 @@ from os import cpu_count
 from pathlib import Path
 
 from t_race.commands.analyze import init_parser_analyze
+from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import init_parser_mine
 from t_race.commands.run import init_parser_run
 from t_race.commands.trace import init_parser_trace
+from t_race.timing.time_tracker import TimeTracker
 
 
 def main():
@@ -34,6 +36,12 @@ def main():
         default=default_workers(),
         help="Maximum number of parallel processes to use",
     )
+    parser.add_argument(
+        "--timings-output",
+        type=Path,
+        default=DEFAULTS.TIMINGS_PATH,
+        help="Path where timing statistics will be stored",
+    )
 
     subparsers = parser.add_subparsers(required=True, title="Commands")
 
@@ -55,11 +63,11 @@ def main():
 
     args = parser.parse_args()
 
-    out: Path = args.base_dir
-    out.mkdir(exist_ok=True)
+    args.base_dir.mkdir(exist_ok=True)
 
-    # call subcommand
-    args.func(args)
+    with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
+        with time_tracker.component("t_race"):
+            args.func(args, time_tracker)
 
 
 def default_workers() -> int:

@@ -31,6 +31,9 @@ from traces_analyzer.cli import (
     STATICCALL,
 )
 
+from t_race.timing.stopwatch import StopWatch
+from t_race.timing.time_tracker import TimeTracker
+
 
 def init_parser_analyze(parser: ArgumentParser):
     parser.add_argument(
@@ -53,7 +56,7 @@ def init_parser_analyze(parser: ArgumentParser):
     parser.set_defaults(func=analyze_command)
 
 
-def analyze_command(args: Namespace):
+def analyze_command(args: Namespace, time_tracker: TimeTracker):
     traces_dir: Path = args.base_dir / args.traces_path
     results_dir: Path = args.base_dir / args.output_path
 
@@ -62,12 +65,13 @@ def analyze_command(args: Namespace):
     trace_dirs = get_trace_dirs(traces_dir)
     process_inputs = [AnalyzeArgs(path, results_dir) for path in trace_dirs]
 
-    with Pool(args.max_workers) as p:
-        for _ in tqdm(
-            p.imap_unordered(analyze, process_inputs, chunksize=1),
-            total=len(process_inputs),
-        ):
-            pass
+    with time_tracker.component("analyze"):
+        with Pool(args.max_workers) as p:
+            for result in tqdm(
+                p.imap_unordered(analyze, process_inputs, chunksize=1),
+                total=len(process_inputs),
+            ):
+                time_tracker.save_time_step_ms("analyze", result.id, result.elapsed_ms)
 
 
 def get_trace_dirs(traces_dir: Path) -> Sequence[Path]:
@@ -80,16 +84,33 @@ class AnalyzeArgs:
     results_directory: Path
 
 
+@dataclass
+class AnalyzeResult:
+    id: str
+    error: bool
+    elapsed_ms: int
+
+
 def analyze(args: AnalyzeArgs):
-    with DirectoryLoader(args.traces_path) as bundle:
-        out_path = args.results_directory / f"{bundle.id}.json"
-        try:
-            evaluations = analyze_attack(bundle)
-            save_evaluations(evaluations, args.results_directory / f"{bundle.id}.json")
-        except Exception:
-            msg = traceback.format_exc()
-            with open(out_path, "w") as f:
-                json.dump({"exception": msg}, f)
+    error = False
+    id = "exception"
+
+    with StopWatch() as stopwatch:
+        with DirectoryLoader(args.traces_path) as bundle:
+            id = bundle.id
+            out_path = args.results_directory / f"{bundle.id}.json"
+            try:
+                evaluations = analyze_attack(bundle)
+                save_evaluations(
+                    evaluations, args.results_directory / f"{bundle.id}.json"
+                )
+            except Exception:
+                error = True
+                msg = traceback.format_exc()
+                with open(out_path, "w") as f:
+                    json.dump({"exception": msg}, f)
+
+    return AnalyzeResult(id, error, stopwatch.elapsed_ms())
 
 
 def analyze_attack(bundle: PotentialAttack):

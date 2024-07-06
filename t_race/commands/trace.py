@@ -9,6 +9,8 @@ from typing import Iterable, Sequence
 from tqdm import tqdm
 
 from t_race.commands.defaults import DEFAULTS
+from t_race.timing.stopwatch import StopWatch
+from t_race.timing.time_tracker import TimeTracker
 
 REVM_REPLAYER_PATH = Path("revm-replayer")
 
@@ -34,7 +36,7 @@ def init_parser_trace(parser: ArgumentParser):
     parser.set_defaults(func=trace_command)
 
 
-def trace_command(args: Namespace):
+def trace_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.transactions_csv
     traces_dir: Path = args.base_dir / args.output_path
 
@@ -47,12 +49,13 @@ def trace_command(args: Namespace):
         for tx_a, tx_b in transactions
     ]
 
-    with Pool(args.max_workers) as p:
-        for _ in tqdm(
-            p.imap_unordered(create_trace, process_inputs, chunksize=1),
-            total=len(process_inputs),
-        ):
-            pass
+    with time_tracker.component("trace"):
+        with Pool(args.max_workers) as p:
+            for result in tqdm(
+                p.imap_unordered(create_trace, process_inputs, chunksize=1),
+                total=len(process_inputs),
+            ):
+                time_tracker.save_time_step_ms("trace", result.id, result.elapsed_ms)
 
 
 @dataclass
@@ -62,10 +65,22 @@ class TraceArgs:
     provider: str
 
 
+@dataclass
+class TraceResult:
+    id: str
+    elapsed_ms: int
+
+
 def create_trace(args: TraceArgs):
-    args.traces_dir.mkdir()
-    run_replayer(
-        args.provider, REVM_REPLAYER_PATH, args.transaction_hashes, args.traces_dir
+    with StopWatch() as stopwatch:
+        args.traces_dir.mkdir()
+        run_replayer(
+            args.provider, REVM_REPLAYER_PATH, args.transaction_hashes, args.traces_dir
+        )
+
+    return TraceResult(
+        f"{args.transaction_hashes[0]}_{args.transaction_hashes[1]}",
+        stopwatch.elapsed_ms(),
     )
 
 
