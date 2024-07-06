@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from dataclasses import dataclass
 from importlib.metadata import version
 import json
 from multiprocessing import Pool
@@ -49,21 +50,21 @@ def init_parser_analyze(parser: ArgumentParser):
         default=Path("results"),
         help="Directory where the analysis results should be stored",
     )
-    parser.set_defaults(func=analyze)
+    parser.set_defaults(func=analyze_command)
 
 
-def analyze(args: Namespace):
+def analyze_command(args: Namespace):
     traces_dir: Path = args.base_dir / args.traces_path
     results_dir: Path = args.base_dir / args.output_path
 
     results_dir.mkdir(exist_ok=True)
 
     trace_dirs = get_trace_dirs(traces_dir)
-    process_inputs = [(path, results_dir) for path in trace_dirs]
+    process_inputs = [AnalyzeArgs(path, results_dir) for path in trace_dirs]
 
     with Pool(args.max_workers) as p:
         for _ in tqdm(
-            p.imap_unordered(_analyze, process_inputs, chunksize=1),
+            p.imap_unordered(analyze, process_inputs, chunksize=1),
             total=len(process_inputs),
         ):
             pass
@@ -73,13 +74,18 @@ def get_trace_dirs(traces_dir: Path) -> Sequence[Path]:
     return [Path(x.path) for x in os.scandir(traces_dir) if x.is_dir()]
 
 
-def _analyze(args: tuple[Path, Path]):
-    path, results_dir = args
-    with DirectoryLoader(path) as bundle:
-        out_path = results_dir / f"{bundle.id}.json"
+@dataclass
+class AnalyzeArgs:
+    traces_path: Path
+    results_directory: Path
+
+
+def analyze(args: AnalyzeArgs):
+    with DirectoryLoader(args.traces_path) as bundle:
+        out_path = args.results_directory / f"{bundle.id}.json"
         try:
             evaluations = analyze_attack(bundle)
-            save_evaluations(evaluations, results_dir / f"{bundle.id}.json")
+            save_evaluations(evaluations, args.results_directory / f"{bundle.id}.json")
         except Exception:
             msg = traceback.format_exc()
             with open(out_path, "w") as f:

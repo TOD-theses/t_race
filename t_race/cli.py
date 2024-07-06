@@ -7,6 +7,7 @@ from pathlib import Path
 
 from t_race.commands.analyze import init_parser_analyze
 from t_race.commands.mine import init_parser_mine
+from t_race.commands.run import init_parser_run
 from t_race.commands.trace import init_parser_trace
 
 
@@ -34,15 +35,22 @@ def main():
         help="Maximum number of parallel processes to use",
     )
 
-    subparsers = parser.add_subparsers(required=True, title="Command")
+    subparsers = parser.add_subparsers(required=True, title="Commands")
 
-    parser_mine = subparsers.add_parser("mine", help="mine help")
+    parser_run = subparsers.add_parser("run", help="Run all T-Race steps")
+    init_parser_run(parser_run)
+
+    parser_mine = subparsers.add_parser(
+        "mine", help="Mine TOD candidates from Ethereum history"
+    )
     init_parser_mine(parser_mine)
 
-    parser_trace = subparsers.add_parser("trace", help="trace help")
+    parser_trace = subparsers.add_parser(
+        "trace", help="Generate traces for TOD candidates"
+    )
     init_parser_trace(parser_trace)
 
-    parser_analyzer = subparsers.add_parser("analyze", help="analyze help")
+    parser_analyzer = subparsers.add_parser("analyze", help="Analyze traces")
     init_parser_analyze(parser_analyzer)
 
     args = parser.parse_args()

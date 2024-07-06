@@ -11,6 +11,8 @@ from tod_attack_miner import Miner
 from tod_attack_miner.rpc.rpc import RPC
 from tod_attack_miner.db.db import DB
 
+from t_race.commands.defaults import DEFAULTS
+
 
 @dataclass
 class BlockRange:
@@ -57,40 +59,57 @@ def init_parser_mine(parser: ArgumentParser):
     parser.add_argument(
         "--output-path",
         type=Path,
-        default=Path("mined_tods.csv"),
+        default=DEFAULTS.TOD_CANDIDATES_CSV_PATH,
         help="Path to the mined TOD",
     )
     parser.add_argument(
         "--output-stats-path",
         type=Path,
-        default=Path("mining_stats.json"),
+        default=DEFAULTS.TOD_MINER_STATS_PATH,
         help="Path where the stats will be stored",
     )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
     parser.add_argument("--postgres-port", type=int, default=5432)
-    parser.set_defaults(func=mine)
+    parser.set_defaults(func=mine_command)
 
 
-def mine(args: Namespace):
+def mine_command(args: Namespace):
     output_path = args.base_dir / args.output_path
     output_stats_path = args.base_dir / args.output_stats_path
 
     conn_str = f"user={args.postgres_user} password={args.postgres_password} host={args.postgres_host} port={args.postgres_port}"
     print("Connecting to postgres: ", conn_str)
 
+    mine(
+        args.blocks,
+        args.window_size,
+        output_path,
+        output_stats_path,
+        conn_str,
+        args.provider,
+    )
+
+
+def mine(
+    block_range: BlockRange,
+    window_size: int | None,
+    output_path: Path,
+    output_stats_path: Path,
+    conn_str: str,
+    provider: str,
+):
     with psycopg.connect(conn_str) as conn:
         conn._check_connection_ok()
-        miner = Miner(RPC(args.provider), DB(conn))
+        miner = Miner(RPC(provider), DB(conn))
 
-        block_range: BlockRange = args.blocks
         miner.fetch(block_range.start, block_range.end)
         print("Finding TOD candidates...", end="\r")
         miner.find_conflicts()
         print(f"Found {miner.count_candidates()} TOD candidates")
         print("Filtering TOD candidates...", end="\r")
-        miner.filter_candidates(window_size=args.window_size)
+        miner.filter_candidates(window_size=window_size)
         print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
         candidates = miner.get_candidates()
@@ -101,7 +120,7 @@ def mine(args: Namespace):
 
         print(f"Wrote {len(candidates)} TODs to {output_path}")
 
-        print("Getting stats for the mining process...")
+        print("Preparing stats...", end="\r")
         stats = miner.get_stats()
 
         with open(output_stats_path, "w") as f:

@@ -1,11 +1,14 @@
 from argparse import ArgumentParser, Namespace
 import csv
+from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
 import subprocess
 from typing import Iterable, Sequence
 
 from tqdm import tqdm
+
+from t_race.commands.defaults import DEFAULTS
 
 REVM_REPLAYER_PATH = Path("revm-replayer")
 
@@ -19,19 +22,19 @@ def init_parser_trace(parser: ArgumentParser):
     parser.add_argument(
         "--transactions-csv",
         type=Path,
-        default=Path("mined_tods.csv"),
+        default=DEFAULTS.TOD_CANDIDATES_CSV_PATH,
         help="Path to a CSV file containing tx_a,tx_b pairs to trace",
     )
     parser.add_argument(
         "--output-path",
         type=Path,
-        default=Path("traces"),
+        default=DEFAULTS.TRACES_PATH,
         help="Directory where the traces should be stored",
     )
-    parser.set_defaults(func=trace)
+    parser.set_defaults(func=trace_command)
 
 
-def trace(args: Namespace):
+def trace_command(args: Namespace):
     transactions_csv_path: Path = args.base_dir / args.transactions_csv
     traces_dir: Path = args.base_dir / args.output_path
 
@@ -40,7 +43,7 @@ def trace(args: Namespace):
     transactions = load_transactions(transactions_csv_path)
 
     process_inputs = [
-        ((tx_a, tx_b), traces_dir / f"{tx_a}_{tx_b}", args.provider)
+        TraceArgs((tx_a, tx_b), traces_dir / f"{tx_a}_{tx_b}", args.provider)
         for tx_a, tx_b in transactions
     ]
 
@@ -52,12 +55,18 @@ def trace(args: Namespace):
             pass
 
 
-def create_trace(args: tuple[tuple[str, str], Path, str]):
-    transactions, tod_dir, provider = args
+@dataclass
+class TraceArgs:
+    transaction_hashes: tuple[str, str]
+    traces_dir: Path
+    provider: str
 
-    tod_dir.mkdir()
-    run_replayer(provider, REVM_REPLAYER_PATH, transactions, tod_dir)
-    return f"Created {transactions}"
+
+def create_trace(args: TraceArgs):
+    args.traces_dir.mkdir()
+    run_replayer(
+        args.provider, REVM_REPLAYER_PATH, args.transaction_hashes, args.traces_dir
+    )
 
 
 def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
