@@ -9,3 +9,4 @@ class DEFAULTS:
     TRACES_PATH = Path("traces")
     RESULTS_PATH = Path("results")
     TIMINGS_PATH = Path("timings.csv")
+    STATS_PATH = Path("stats")

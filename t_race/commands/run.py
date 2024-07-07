@@ -12,6 +12,7 @@ from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import block_range_type, mine
 from t_race.commands.trace import TraceArgs, create_trace, load_transactions
 from t_race.timing.time_tracker import TimeTracker
+from t_race_stats.stats import process_stats
 
 
 def init_parser_run(parser: ArgumentParser):
@@ -34,15 +35,19 @@ def init_parser_run(parser: ArgumentParser):
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
     parser.add_argument("--postgres-port", type=int, default=5432)
-    parser.set_defaults(func=run_command)
+    parser.set_defaults(func=run_command, timing=False)
 
 
-def run_command(args: Namespace, time_tracker: TimeTracker):
-    with time_tracker.component("mine"):
-        run_mining(args, time_tracker)
+def run_command(args: Namespace):
+    with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
+        with time_tracker.component("t_race"):
+            with time_tracker.component("mine"):
+                run_mining(args, time_tracker)
 
-    with time_tracker.component("trace_analyze"):
-        run_trace_analyze(args, time_tracker)
+            with time_tracker.component("trace_analyze"):
+                run_trace_analyze(args, time_tracker)
+
+    process_stats(args.base_dir, args.base_dir / DEFAULTS.STATS_PATH)
 
 
 def run_mining(args: Namespace, time_tracker: TimeTracker):

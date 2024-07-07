@@ -5,3 +5,4 @@ requests==2.31.0
 # TODO: use specific commits
 traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer
 tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner
+t_race_stats @ git+https://github.com/TOD-theses/t_race_stats

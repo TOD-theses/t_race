@@ -9,6 +9,7 @@ from t_race.commands.analyze import init_parser_analyze
 from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import init_parser_mine
 from t_race.commands.run import init_parser_run
+from t_race.commands.stats import init_parser_stats
 from t_race.commands.trace import init_parser_trace
 from t_race.timing.time_tracker import TimeTracker
 
@@ -42,6 +43,7 @@ def main():
         default=DEFAULTS.TIMINGS_PATH,
         help="Path where timing statistics will be stored",
     )
+    parser.set_defaults(timing=True)
 
     subparsers = parser.add_subparsers(required=True, title="Commands")
 
@@ -61,13 +63,19 @@ def main():
     parser_analyzer = subparsers.add_parser("analyze", help="Analyze traces")
     init_parser_analyze(parser_analyzer)
 
+    parser_stats = subparsers.add_parser("stats", help="Create stats")
+    init_parser_stats(parser_stats)
+
     args = parser.parse_args()
 
     args.base_dir.mkdir(exist_ok=True)
 
-    with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
-        with time_tracker.component("t_race"):
-            args.func(args, time_tracker)
+    if args.timing:
+        with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
+            with time_tracker.component("t_race"):
+                args.func(args, time_tracker)
+    else:
+        args.func(args)
 
 
 def default_workers() -> int:
