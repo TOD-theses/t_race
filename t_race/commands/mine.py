@@ -113,7 +113,7 @@ def mine(
 
         with time_tracker.step("mine", "candidates"):
             print("Finding TOD candidates...", end="\r")
-            miner.find_conflicts()
+            miner.find_collisions()
             print(f"Found {miner.count_candidates()} TOD candidates")
 
         with time_tracker.step("mine", "filter"):
