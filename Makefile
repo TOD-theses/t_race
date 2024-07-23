@@ -88,3 +88,7 @@ docs:             ## Build the documentation.
 	@echo "building documentation ..."
 	@$(ENV_PREFIX)mkdocs build
 	URL="site/index.html"; xdg-open $$URL || sensible-browser $$URL || x-www-browser $$URL || gnome-open $$URL || open $$URL
+
+.PHONY: docker
+docker:           ## Build docker image from the Containerfile
+	docker build -t t_race:latest -f Containerfile .
