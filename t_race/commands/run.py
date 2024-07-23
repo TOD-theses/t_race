@@ -31,6 +31,12 @@ def init_parser_run(parser: ArgumentParser):
         default=None,
         help="If passed, filter TOD candidates that are {window-size} or more blocks apart",
     )
+    parser.add_argument(
+        "--duplicates-limit",
+        type=int,
+        default=None,
+        help="If passed, limit the amount of collisions per address/code/family to this number",
+    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
@@ -59,6 +65,7 @@ def run_mining(args: Namespace, time_tracker: TimeTracker):
     mine(
         args.blocks,
         args.window_size,
+        args.duplicates_limit,
         output_path,
         output_stats_path,
         conn_str,

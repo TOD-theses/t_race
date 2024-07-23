@@ -10,6 +10,10 @@ import psycopg
 from tod_attack_miner import Miner
 from tod_attack_miner.rpc.rpc import RPC
 from tod_attack_miner.db.db import DB
+from tod_attack_miner.db.filters import (
+    get_filters_except_duplicate_limits,
+    get_filters_duplicate_limits,
+)
 
 from t_race.commands.defaults import DEFAULTS
 from t_race.timing.time_tracker import TimeTracker
@@ -58,6 +62,12 @@ def init_parser_mine(parser: ArgumentParser):
         help="If passed, filter TOD candidates that are {window-size} or more blocks apart",
     )
     parser.add_argument(
+        "--duplicates-limit",
+        type=int,
+        default=None,
+        help="If passed, limit the amount of collisions per address/code/family to this number",
+    )
+    parser.add_argument(
         "--output-path",
         type=Path,
         default=DEFAULTS.TOD_CANDIDATES_CSV_PATH,
@@ -87,6 +97,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
         mine(
             args.blocks,
             args.window_size,
+            args.duplicates_limit,
             output_path,
             output_stats_path,
             conn_str,
@@ -98,6 +109,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
 def mine(
     block_range: BlockRange,
     window_size: int | None,
+    duplicates_limit: int | None,
     output_path: Path,
     output_stats_path: Path,
     conn_str: str,
@@ -111,6 +123,10 @@ def mine(
         with time_tracker.step("mine", "fetch"):
             miner.fetch(block_range.start, block_range.end)
 
+        if duplicates_limit is not None:
+            with time_tracker.step("mine", "skelcodes"):
+                miner.compute_skelcodes()
+
         with time_tracker.step("mine", "candidates"):
             print("Finding TOD candidates...", end="\r")
             miner.find_collisions()
@@ -118,7 +134,13 @@ def mine(
 
         with time_tracker.step("mine", "filter"):
             print("Filtering TOD candidates...", end="\r")
-            miner.filter_candidates(window_size=window_size)
+            print(
+                f"Filter config: window_size={window_size}, duplicates_limit={duplicates_limit}"
+            )
+            filters = get_filters_except_duplicate_limits(window_size=window_size)
+            if duplicates_limit is not None:
+                filters += get_filters_duplicate_limits(limit=duplicates_limit)
+            miner.filter_candidates(filters)
             print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
         with time_tracker.step("mine", "save_candidates"):
