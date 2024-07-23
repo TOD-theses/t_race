@@ -6,6 +6,7 @@ from os import cpu_count
 from pathlib import Path
 
 from t_race.commands.analyze import init_parser_analyze
+from t_race.commands.check import init_parser_check
 from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import init_parser_mine
 from t_race.commands.run import init_parser_run
@@ -54,6 +55,11 @@ def main():
         "mine", help="Mine TOD candidates from Ethereum history"
     )
     init_parser_mine(parser_mine)
+
+    parser_check = subparsers.add_parser(
+        "check", help="Check if TOD candidates are really TOD"
+    )
+    init_parser_check(parser_check)
 
     parser_trace = subparsers.add_parser(
         "trace", help="Generate traces for TOD candidates"
