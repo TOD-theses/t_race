@@ -7,17 +7,32 @@ See https://tod-theses.github.io/t_race/.
 
 ## Install
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for installation instructions.
+In a virtual environment, run:
+
+```
+pip install git+https://github.com/TOD-theses/t_race
+```
+
+For a docker version, see below. To install the local version with development requirements, use `make install`.
 
 ## Usage
 
 After installing it, you can run it as following:
 
 ```bash
-$ python -m t_race --help
-#or
 $ t_race --help
+$ t_race run --help
 ```
+
+### Configuration
+
+The tool includes global options, such as the `--provider`, and command specific options, such as `--window-size` for the `t_race run` command.
+
+For global options, place them directly after `t_race`, e.g. `t_race --provider http://example.org run`. For command specific options, place them at the end.
+
+### Run command
+
+The `t_race run` command will execute all components of T-RACE.
 
 ## Docker
 
