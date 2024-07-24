@@ -2,6 +2,7 @@ from argparse import ArgumentParser, Namespace
 import csv
 from dataclasses import dataclass
 from importlib.metadata import version
+import json
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from typing import Iterable, Literal, Sequence
@@ -34,6 +35,12 @@ def init_parser_check(parser: ArgumentParser):
         help="Path to a CSV file containing tx_a,tx_b pairs to trace",
     )
     parser.add_argument(
+        "--traces-dir",
+        type=Path,
+        default=DEFAULTS.TRACES_PATH,
+        help="Directory where the traces should be stored",
+    )
+    parser.add_argument(
         "--results-csv",
         type=Path,
         default=DEFAULTS.TOD_CHECK_CSV_PATH,
@@ -44,7 +51,8 @@ def init_parser_check(parser: ArgumentParser):
 
 def check_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.tod_candidates_csv
-    results_file_path: Path = args.base_dir / args.results_csv
+    tod_check_results_file_path: Path = args.base_dir / args.results_csv
+    traces_directory_path: Path = args.base_dir / args.traces_dir
 
     transaction_pairs = load_transactions(transactions_csv_path)
 
@@ -67,7 +75,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     ]
 
     with time_tracker.component("check"):
-        with open(results_file_path, "w", newline="") as f:
+        with open(tod_check_results_file_path, "w", newline="") as f:
             writer = csv.DictWriter(f, ["tx_a", "tx_b", "result"])
             writer.writeheader()
             with ThreadPool(args.max_workers) as p:
@@ -76,7 +84,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
                     total=len(process_inputs),
                 ):
                     time_tracker.save_time_step_ms(
-                        "trace", result.id, result.elapsed_ms
+                        "check", result.id, result.elapsed_ms
                     )
                     writer.writerow(
                         {
@@ -85,6 +93,24 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
                             "result": result.result,
                         }
                     )
+
+    process_inputs = [
+        TraceArgs((tx_a, tx_b), traces_directory_path, args.provider)
+        for tx_a, tx_b in transaction_pairs
+    ]
+
+    print("Creating execution traces")
+    traces_directory_path.mkdir(exist_ok=True)
+
+    with time_tracker.component("trace"):
+        with ThreadPool(args.max_workers) as p:
+            for result in tqdm(
+                p.imap_unordered(trace, process_inputs, chunksize=1),
+                total=len(process_inputs),
+            ):
+                time_tracker.save_time_step_ms("trace", result.id, result.elapsed_ms)
+                if result.error:
+                    print(result.error)
 
 
 @dataclass
@@ -125,6 +151,42 @@ def check(args: CheckArgs):
     return CheckResult(
         f"{args.transaction_hashes[0]}_{args.transaction_hashes[1]}",
         result,  # type: ignore
+        stopwatch.elapsed_ms(),
+    )
+
+
+@dataclass
+class TraceArgs:
+    transaction_hashes: tuple[str, str]
+    output_dir: Path
+    provider: str
+
+
+@dataclass
+class TraceResult:
+    id: str
+    error: Exception | None
+    elapsed_ms: int
+
+
+def trace(args: TraceArgs) -> TraceResult:
+    error = None
+    with StopWatch() as stopwatch:
+        global checker
+        assert checker is not None
+        tx_a, tx_b = args.transaction_hashes
+        try:
+            trace_normal, trace_reverse = checker.trace_both_scenarios(tx_a, tx_b)
+            with open(args.output_dir / f"{tx_a}_{tx_b}.json", "w") as f:
+                json.dump(trace_normal, f)
+            with open(args.output_dir / f"{tx_b}_{tx_a}.json", "w") as f:
+                json.dump(trace_reverse, f)
+        except Exception as e:
+            error = e
+
+    return TraceResult(
+        f"{tx_a}_{tx_b}",  # type: ignore
+        error,
         stopwatch.elapsed_ms(),
     )
 
