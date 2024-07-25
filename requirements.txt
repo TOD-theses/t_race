@@ -4,6 +4,6 @@ typing_extensions==4.10.0
 requests==2.31.0
 # TODO: use specific commits
 traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer
-tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@6e9f9fcdc969023268be5decbe5c17aa11a33518
+tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@26e2e67dad40327f3b2ce9142c5ead22a05658f4
 tod_checker @ git+https://github.com/TOD-theses/tod_checker
 t_race_stats @ git+https://github.com/TOD-theses/t_race_stats

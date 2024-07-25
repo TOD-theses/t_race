@@ -194,7 +194,7 @@ def trace(args: TraceArgs) -> TraceResult:
 def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
-        return [(row["tx_write_hash"], row["tx_access_hash"]) for row in reader]
+        return [(row["tx_a"], row["tx_b"]) for row in reader]
 
 
 def flatten(nested_list: Iterable[Iterable]) -> list:

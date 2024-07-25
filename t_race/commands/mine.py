@@ -152,8 +152,8 @@ def mine(
                 writer = csv.DictWriter(
                     f,
                     fieldnames=[
-                        "tx_write_hash",
-                        "tx_access_hash",
+                        "tx_a",
+                        "tx_b",
                         "block_dist",
                         "types",
                     ],
