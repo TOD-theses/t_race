@@ -14,7 +14,7 @@ from t_race.timing.stopwatch import StopWatch
 from t_race.timing.time_tracker import TimeTracker
 
 from tod_checker.checker.checker import TodChecker, ReplayDivergedException
-from tod_checker.rpc.rpc import RPC
+from tod_checker.rpc.rpc import RPC, OverridesFormatter
 from tod_checker.executor.executor import TransactionExecutor
 from tod_checker.state_changes.fetcher import StateChangesFetcher
 from tod_checker.tx_block_mapper.tx_block_mapper import TransactionBlockMapper
@@ -35,6 +35,17 @@ def init_parser_check(parser: ArgumentParser):
         help="Path to a CSV file containing tx_a,tx_b pairs to trace",
     )
     parser.add_argument(
+        "--create-traces",
+        action="store_true",
+        help="Create traces for every found TOD",
+    )
+    parser.add_argument(
+        "--traces-provider",
+        type=str,
+        default=None,
+        help="If specified, use this RPC provider to generate traces (heavier load) instead of the normal one",
+    )
+    parser.add_argument(
         "--traces-dir",
         type=Path,
         default=DEFAULTS.TRACES_PATH,
@@ -52,11 +63,13 @@ def init_parser_check(parser: ArgumentParser):
 def check_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.tod_candidates_csv
     tod_check_results_file_path: Path = args.base_dir / args.results_csv
+    create_traces: bool = args.create_traces
     traces_directory_path: Path = args.base_dir / args.traces_dir
+    traces_provider: str = args.traces_provider or args.provider
 
     transaction_pairs = load_transactions(transactions_csv_path)
 
-    rpc = RPC(args.provider)
+    rpc = RPC(args.provider, OverridesFormatter("old Erigon"))
     state_changes_fetcher = StateChangesFetcher(rpc)
     tx_block_mapper = TransactionBlockMapper(rpc)
     simulator = TransactionExecutor(rpc)
@@ -65,52 +78,69 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     global checker
     checker = TodChecker(simulator, state_changes_fetcher, tx_block_mapper)
 
-    print("Fetching state changes")
-    checker.download_data_for_transactions(flatten(transaction_pairs))
-
     print("Checking for TOD")
 
-    process_inputs = [
-        CheckArgs((tx_a, tx_b), args.provider) for tx_a, tx_b in transaction_pairs
-    ]
+    tods: list[tuple[str, str]] = []
 
     with time_tracker.component("check"):
+        blocks = set()
+        with time_tracker.step("check", "download transactions"):
+            for tx in tqdm(set(flatten(transaction_pairs)), desc="Fetch transactions"):
+                blocks.add(checker.download_data_for_transaction(tx))
+        with time_tracker.step("check", "fetch state changes"):
+            for block in tqdm(blocks, desc="Fetching state changes"):
+                checker.download_data_for_block(block)
+
         with open(tod_check_results_file_path, "w", newline="") as f:
             writer = csv.DictWriter(f, ["tx_a", "tx_b", "result"])
             writer.writeheader()
             with ThreadPool(args.max_workers) as p:
+                process_inputs = [
+                    CheckArgs((tx_a, tx_b), args.provider)
+                    for tx_a, tx_b in transaction_pairs
+                ]
                 for result in tqdm(
                     p.imap_unordered(check, process_inputs, chunksize=1),
                     total=len(process_inputs),
+                    desc="Check TOD",
                 ):
                     time_tracker.save_time_step_ms(
                         "check", result.id, result.elapsed_ms
                     )
+                    tx_a, tx_b = result.id.split("_")
                     writer.writerow(
                         {
-                            "tx_a": result.id.split("_")[0],
-                            "tx_b": result.id.split("_")[1],
+                            "tx_a": tx_a,
+                            "tx_b": tx_b,
                             "result": result.result,
                         }
                     )
+                    if result.result == "TOD":
+                        tods.append((tx_a, tx_b))
 
-    process_inputs = [
-        TraceArgs((tx_a, tx_b), traces_directory_path, args.provider)
-        for tx_a, tx_b in transaction_pairs
-    ]
+    if create_traces:
+        print("Creating execution traces")
+        traces_rpc = RPC(traces_provider, OverridesFormatter("old Erigon"))
+        traces_simulator = TransactionExecutor(traces_rpc)
+        checker = TodChecker(traces_simulator, state_changes_fetcher, tx_block_mapper)
 
-    print("Creating execution traces")
-    traces_directory_path.mkdir(exist_ok=True)
+        traces_directory_path.mkdir(exist_ok=True)
 
-    with time_tracker.component("trace"):
-        with ThreadPool(args.max_workers) as p:
-            for result in tqdm(
-                p.imap_unordered(trace, process_inputs, chunksize=1),
-                total=len(process_inputs),
-            ):
-                time_tracker.save_time_step_ms("trace", result.id, result.elapsed_ms)
-                if result.error:
-                    print(result.error)
+        with time_tracker.component("trace"):
+            with ThreadPool(args.max_workers) as p:
+                process_inputs = [
+                    TraceArgs((tx_a, tx_b), traces_directory_path, args.provider)
+                    for tx_a, tx_b in tods
+                ]
+                for result in tqdm(
+                    p.imap_unordered(trace, process_inputs, chunksize=1),
+                    total=len(process_inputs),
+                ):
+                    time_tracker.save_time_step_ms(
+                        "trace", result.id, result.elapsed_ms
+                    )
+                    if result.error:
+                        print(result.error)
 
 
 @dataclass
