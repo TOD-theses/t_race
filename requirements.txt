@@ -2,8 +2,7 @@ psycopg[binary]
 tqdm==4.66.1
 typing_extensions==4.10.0
 requests==2.31.0
-# TODO: use specific commits
-traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer
+traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer@ffe39528f01e2a336792ce2b70d136b2333a3633
 tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@26e2e67dad40327f3b2ce9142c5ead22a05658f4
-tod_checker @ git+https://github.com/TOD-theses/tod_checker
-t_race_stats @ git+https://github.com/TOD-theses/t_race_stats
+tod_checker @ git+https://github.com/TOD-theses/tod_checker@871e68faee273524527c125d534a010a526223c3
+t_race_stats @ git+https://github.com/TOD-theses/t_race_stats@6e62bb102207d2227a5246d39ae43ae194fcb91c
