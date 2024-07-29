@@ -35,6 +35,11 @@ def init_parser_check(parser: ArgumentParser):
         help="Path to a CSV file containing tx_a,tx_b pairs to trace",
     )
     parser.add_argument(
+        "--tod-method",
+        choices=("original", "adapted"),
+        default="adapted",
+    )
+    parser.add_argument(
         "--create-traces",
         action="store_true",
         help="Create traces for every found TOD",
@@ -63,6 +68,7 @@ def init_parser_check(parser: ArgumentParser):
 def check_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.tod_candidates_csv
     tod_check_results_file_path: Path = args.base_dir / args.results_csv
+    tod_method = args.tod_method
     create_traces: bool = args.create_traces
     traces_directory_path: Path = args.base_dir / args.traces_dir
     traces_provider: str = args.traces_provider or args.provider
@@ -77,6 +83,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     # threads should make read-only accesses
     global checker
     checker = TodChecker(simulator, state_changes_fetcher, tx_block_mapper)
+    use_original_def = tod_method == "original"
 
     print("Checking for TOD")
 
@@ -96,7 +103,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
             writer.writeheader()
             with ThreadPool(args.max_workers) as p:
                 process_inputs = [
-                    CheckArgs((tx_a, tx_b), args.provider)
+                    CheckArgs((tx_a, tx_b), args.provider, use_original_def)
                     for tx_a, tx_b in transaction_pairs
                 ]
                 for result in tqdm(
@@ -147,6 +154,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
 class CheckArgs:
     transaction_hashes: tuple[str, str]
     provider: str
+    original_definition: bool
 
 
 @dataclass
@@ -167,7 +175,9 @@ def check(args: CheckArgs):
         assert checker is not None
         tx_a, tx_b = args.transaction_hashes
         try:
-            res = checker.is_TOD(tx_a, tx_b)
+            res = checker.is_TOD(
+                tx_a, tx_b, original_definition=args.original_definition
+            )
             if not res:
                 result = "not TOD"
             else:
@@ -201,21 +211,26 @@ class TraceResult:
 
 def trace(args: TraceArgs) -> TraceResult:
     error = None
+    tx_a, tx_b = args.transaction_hashes
     with StopWatch() as stopwatch:
         global checker
         assert checker is not None
-        tx_a, tx_b = args.transaction_hashes
         try:
-            trace_normal, trace_reverse = checker.trace_both_scenarios(tx_a, tx_b)
-            with open(args.output_dir / f"{tx_a}_{tx_b}.json", "w") as f:
-                json.dump(trace_normal, f)
-            with open(args.output_dir / f"{tx_b}_{tx_a}.json", "w") as f:
-                json.dump(trace_reverse, f)
+            traces = checker.trace_both_scenarios(tx_a, tx_b)
+            trace_normal_b, trace_reverse_b, trace_normal_a, trace_reverse_a = traces
+            with open(args.output_dir / f"{tx_a}_normal.json", "w") as f:
+                json.dump(trace_normal_a, f)
+            with open(args.output_dir / f"{tx_a}_reverse.json", "w") as f:
+                json.dump(trace_reverse_a, f)
+            with open(args.output_dir / f"{tx_b}_normal.json", "w") as f:
+                json.dump(trace_normal_b, f)
+            with open(args.output_dir / f"{tx_b}_reverse.json", "w") as f:
+                json.dump(trace_reverse_b, f)
         except Exception as e:
             error = e
 
     return TraceResult(
-        f"{tx_a}_{tx_b}",  # type: ignore
+        f"{tx_a}_{tx_b}",
         error,
         stopwatch.elapsed_ms(),
     )
