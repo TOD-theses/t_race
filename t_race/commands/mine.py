@@ -93,7 +93,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
     conn_str = f"user={args.postgres_user} password={args.postgres_password} host={args.postgres_host} port={args.postgres_port}"
     print("Connecting to postgres: ", conn_str)
 
-    with time_tracker.component("mine"):
+    with time_tracker.task(("mine",)):
         mine(
             args.blocks,
             args.window_size,
@@ -120,19 +120,19 @@ def mine(
         conn._check_connection_ok()
         miner = Miner(RPC(provider), DB(conn))
 
-        with time_tracker.step("mine", "fetch"):
+        with time_tracker.task(("mine", "fetch")):
             miner.fetch(block_range.start, block_range.end)
 
         if duplicates_limit is not None:
-            with time_tracker.step("mine", "skelcodes"):
+            with time_tracker.task(("mine", "skelcodes")):
                 miner.compute_skelcodes()
 
-        with time_tracker.step("mine", "candidates"):
+        with time_tracker.task(("mine", "candidates")):
             print("Finding TOD candidates...", end="\r")
             miner.find_collisions()
             print(f"Found {miner.count_candidates()} TOD candidates")
 
-        with time_tracker.step("mine", "filter"):
+        with time_tracker.task(("mine", "filter")):
             print("Filtering TOD candidates...", end="\r")
             print(
                 f"Filter config: window_size={window_size}, duplicates_limit={duplicates_limit}"
@@ -143,7 +143,7 @@ def mine(
             miner.filter_candidates(filters)
             print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
-        with time_tracker.step("mine", "save_candidates"):
+        with time_tracker.task(("mine", "save_candidates")):
             candidates = miner.get_candidates()
             for c in candidates:
                 c["types"] = "|".join(c["types"])  # type: ignore
@@ -163,7 +163,7 @@ def mine(
 
             print(f"Wrote {len(candidates)} TODs to {output_path}")
 
-        with time_tracker.step("mine", "stats"):
+        with time_tracker.task(("mine", "stats")):
             print("Preparing stats...", end="\r")
             stats = miner.get_stats()
 

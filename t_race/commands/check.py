@@ -13,7 +13,11 @@ from t_race.commands.defaults import DEFAULTS
 from t_race.timing.stopwatch import StopWatch
 from t_race.timing.time_tracker import TimeTracker
 
-from tod_checker.checker.checker import TodChecker, ReplayDivergedException
+from tod_checker.checker.checker import (
+    TodChecker,
+    ReplayDivergedException,
+    InsufficientEtherReplayException,
+)
 from tod_checker.rpc.rpc import RPC, OverridesFormatter
 from tod_checker.executor.executor import TransactionExecutor
 from tod_checker.state_changes.fetcher import StateChangesFetcher
@@ -36,7 +40,7 @@ def init_parser_check(parser: ArgumentParser):
     )
     parser.add_argument(
         "--tod-method",
-        choices=("original", "adapted"),
+        choices=("original", "adapted", "fast-fail-adapted"),
         default="adapted",
     )
     parser.add_argument(
@@ -83,47 +87,47 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     # threads should make read-only accesses
     global checker
     checker = TodChecker(simulator, state_changes_fetcher, tx_block_mapper)
-    use_original_def = tod_method == "original"
 
     print("Checking for TOD")
 
     tods: list[tuple[str, str]] = []
 
-    with time_tracker.component("check"):
+    with time_tracker.task(("check",)):
         blocks = set()
-        with time_tracker.step("check", "download transactions"):
+        with time_tracker.task(("check", "download transactions")):
             for tx in tqdm(set(flatten(transaction_pairs)), desc="Fetch transactions"):
                 blocks.add(checker.download_data_for_transaction(tx))
-        with time_tracker.step("check", "fetch state changes"):
-            for block in tqdm(blocks, desc="Fetching state changes"):
+        with time_tracker.task(("check", "fetch state changes")):
+            for block in tqdm(blocks, desc="Fetch state changes"):
                 checker.download_data_for_block(block)
 
-        with open(tod_check_results_file_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, ["tx_a", "tx_b", "result"])
-            writer.writeheader()
-            with ThreadPool(args.max_workers) as p:
-                process_inputs = [
-                    CheckArgs((tx_a, tx_b), args.provider, use_original_def)
-                    for tx_a, tx_b in transaction_pairs
-                ]
-                for result in tqdm(
-                    p.imap_unordered(check, process_inputs, chunksize=1),
-                    total=len(process_inputs),
-                    desc="Check TOD",
-                ):
-                    time_tracker.save_time_step_ms(
-                        "check", result.id, result.elapsed_ms
-                    )
-                    tx_a, tx_b = result.id.split("_")
-                    writer.writerow(
-                        {
-                            "tx_a": tx_a,
-                            "tx_b": tx_b,
-                            "result": result.result,
-                        }
-                    )
-                    if result.result == "TOD":
-                        tods.append((tx_a, tx_b))
+        with time_tracker.task(("check", "check")):
+            with open(tod_check_results_file_path, "w", newline="") as f:
+                writer = csv.DictWriter(f, ["tx_a", "tx_b", "result"])
+                writer.writeheader()
+                with ThreadPool(args.max_workers) as p:
+                    process_inputs = [
+                        CheckArgs((tx_a, tx_b), args.provider, tod_method)
+                        for tx_a, tx_b in transaction_pairs
+                    ]
+                    for result in tqdm(
+                        p.imap_unordered(check, process_inputs, chunksize=1),
+                        total=len(process_inputs),
+                        desc="Check TOD",
+                    ):
+                        time_tracker.save_time_ms(
+                            ("check", "check", result.id), result.elapsed_ms
+                        )
+                        tx_a, tx_b = result.id.split("_")
+                        writer.writerow(
+                            {
+                                "tx_a": tx_a,
+                                "tx_b": tx_b,
+                                "result": result.result,
+                            }
+                        )
+                        if result.result == "TOD":
+                            tods.append((tx_a, tx_b))
 
     if create_traces:
         print("Creating execution traces")
@@ -133,7 +137,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
 
         traces_directory_path.mkdir(exist_ok=True)
 
-        with time_tracker.component("trace"):
+        with time_tracker.task(("trace",)):
             with ThreadPool(args.max_workers) as p:
                 process_inputs = [
                     TraceArgs((tx_a, tx_b), traces_directory_path, args.provider)
@@ -143,9 +147,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
                     p.imap_unordered(trace, process_inputs, chunksize=1),
                     total=len(process_inputs),
                 ):
-                    time_tracker.save_time_step_ms(
-                        "trace", result.id, result.elapsed_ms
-                    )
+                    time_tracker.save_time_ms(("trace", result.id), result.elapsed_ms)
                     if result.error:
                         print(result.error)
 
@@ -154,7 +156,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
 class CheckArgs:
     transaction_hashes: tuple[str, str]
     provider: str
-    original_definition: bool
+    tod_method: Literal["original"] | Literal["adapted"] | Literal["fast-fail-adapted"]
 
 
 @dataclass
@@ -164,6 +166,8 @@ class CheckResult:
         Literal["TOD"]
         | Literal["not TOD"]
         | Literal["replay diverged"]
+        | Literal["insufficient ether replay detected"]
+        | Literal["insufficient ether replay error"]
         | Literal["error"]
     )
     elapsed_ms: int
@@ -176,7 +180,10 @@ def check(args: CheckArgs):
         tx_a, tx_b = args.transaction_hashes
         try:
             res = checker.is_TOD(
-                tx_a, tx_b, original_definition=args.original_definition
+                tx_a,
+                tx_b,
+                args.tod_method,
+                all_changes=False,
             )
             if not res:
                 result = "not TOD"
@@ -184,9 +191,13 @@ def check(args: CheckArgs):
                 result = "TOD"
         except ReplayDivergedException:
             result = "replay diverged"
+        except InsufficientEtherReplayException:
+            result = "insufficient ether replay detected"
         except Exception as e:
-            print(e)
-            result = "error"
+            if "insufficient funds" in str(e).lower():
+                result = "insufficient ether replay error"
+            else:
+                result = "error"
 
     return CheckResult(
         f"{args.transaction_hashes[0]}_{args.transaction_hashes[1]}",

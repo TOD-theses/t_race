@@ -65,13 +65,13 @@ def analyze_command(args: Namespace, time_tracker: TimeTracker):
     trace_dirs = get_trace_dirs(traces_dir)
     process_inputs = [AnalyzeArgs(path, results_dir) for path in trace_dirs]
 
-    with time_tracker.component("analyze"):
+    with time_tracker.task(("analyze",)):
         with Pool(args.max_workers) as p:
             for result in tqdm(
                 p.imap_unordered(analyze, process_inputs, chunksize=1),
                 total=len(process_inputs),
             ):
-                time_tracker.save_time_step_ms("analyze", result.id, result.elapsed_ms)
+                time_tracker.save_time_ms(("analyze", result.id), result.elapsed_ms)
 
 
 def get_trace_dirs(traces_dir: Path) -> Sequence[Path]:

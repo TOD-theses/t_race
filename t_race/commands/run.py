@@ -46,11 +46,11 @@ def init_parser_run(parser: ArgumentParser):
 
 def run_command(args: Namespace):
     with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
-        with time_tracker.component("t_race"):
-            with time_tracker.component("mine"):
+        with time_tracker.task(("t_race",)):
+            with time_tracker.task(("mine",)):
                 run_mining(args, time_tracker)
 
-            with time_tracker.component("trace_analyze"):
+            with time_tracker.task(("trace_analyze",)):
                 run_trace_analyze(args, time_tracker)
 
     process_stats(args.base_dir, args.base_dir / DEFAULTS.STATS_PATH)
@@ -94,11 +94,11 @@ def run_trace_analyze(args: Namespace, time_tracker: TimeTracker):
             desc="Trace and analyze TOD candidates",
             total=len(process_inputs),
         ):
-            time_tracker.save_time_step_ms(
-                "trace", trace_result.id, trace_result.elapsed_ms
+            time_tracker.save_time_ms(
+                ("trace", trace_result.id), trace_result.elapsed_ms
             )
-            time_tracker.save_time_step_ms(
-                "analyze", analyze_result.id, analyze_result.elapsed_ms
+            time_tracker.save_time_ms(
+                ("analyze", analyze_result.id), analyze_result.elapsed_ms
             )
 
     traces_dir.rmdir()

@@ -49,13 +49,13 @@ def trace_command(args: Namespace, time_tracker: TimeTracker):
         for tx_a, tx_b in transactions
     ]
 
-    with time_tracker.component("trace"):
+    with time_tracker.task(("trace",)):
         with Pool(args.max_workers) as p:
             for result in tqdm(
                 p.imap_unordered(create_trace, process_inputs, chunksize=1),
                 total=len(process_inputs),
             ):
-                time_tracker.save_time_step_ms("trace", result.id, result.elapsed_ms)
+                time_tracker.save_time_ms(("trace", result.id), result.elapsed_ms)
 
 
 @dataclass

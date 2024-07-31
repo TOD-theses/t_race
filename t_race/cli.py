@@ -78,7 +78,7 @@ def main():
 
     if args.timing:
         with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
-            with time_tracker.component("t_race"):
+            with time_tracker.task(("t_race",)):
                 args.func(args, time_tracker)
     else:
         args.func(args)
