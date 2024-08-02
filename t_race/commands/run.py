@@ -8,9 +8,9 @@ from tqdm import tqdm
 
 
 from t_race.commands.analyze import AnalyzeArgs, analyze
+from t_race.commands.check import TraceArgs, load_tod_transactions, trace
 from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import block_range_type, mine
-from t_race.commands.trace import TraceArgs, create_trace, load_transactions
 from t_race.timing.time_tracker import TimeTracker
 from t_race_stats.stats import process_stats
 
@@ -81,7 +81,7 @@ def run_trace_analyze(args: Namespace, time_tracker: TimeTracker):
     traces_dir: Path = args.base_dir / DEFAULTS.TRACES_PATH
     traces_dir.mkdir(exist_ok=True)
 
-    transactions = load_transactions(tod_candidates_csv_path)
+    transactions = load_tod_transactions(tod_candidates_csv_path)
 
     process_inputs = [
         create_process_input(tx_a, tx_b, traces_dir, results_dir, args.provider)
@@ -118,7 +118,7 @@ def create_process_input(
 def trace_analyze(args: tuple[TraceArgs, AnalyzeArgs]):
     trace_args, analyze_args = args
 
-    trace_result = create_trace(trace_args)
+    trace_result = trace(trace_args)
     analyze_result = analyze(analyze_args)
 
     shutil.rmtree(analyze_args.traces_path)

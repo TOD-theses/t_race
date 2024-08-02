@@ -11,7 +11,6 @@ from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import init_parser_mine
 from t_race.commands.run import init_parser_run
 from t_race.commands.stats import init_parser_stats
-from t_race.commands.trace import init_parser_trace
 from t_race.timing.time_tracker import TimeTracker
 
 
@@ -60,11 +59,6 @@ def main():
         "check", help="Check if TOD candidates are really TOD"
     )
     init_parser_check(parser_check)
-
-    parser_trace = subparsers.add_parser(
-        "trace", help="Generate traces for TOD candidates"
-    )
-    init_parser_trace(parser_trace)
 
     parser_analyzer = subparsers.add_parser("analyze", help="Analyze traces")
     init_parser_analyze(parser_analyzer)

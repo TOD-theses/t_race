@@ -77,7 +77,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     traces_directory_path: Path = args.base_dir / args.traces_dir
     traces_provider: str = args.traces_provider or args.provider
 
-    transaction_pairs = load_transactions(transactions_csv_path)
+    transaction_pairs = load_tod_candidates(transactions_csv_path)
 
     rpc = RPC(args.provider, OverridesFormatter("old Erigon"))
     state_changes_fetcher = StateChangesFetcher(rpc)
@@ -273,10 +273,16 @@ def trace(args: TraceArgs) -> TraceResult:
     )
 
 
-def load_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
+def load_tod_candidates(csv_path: Path) -> Sequence[tuple[str, str]]:
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         return [(row["tx_a"], row["tx_b"]) for row in reader]
+
+
+def load_tod_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        return [(row["tx_a"], row["tx_b"]) for row in reader if row["result"] == "TOD"]
 
 
 def flatten(nested_list: Iterable[Iterable]) -> list:
