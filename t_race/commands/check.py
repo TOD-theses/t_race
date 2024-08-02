@@ -209,7 +209,7 @@ def check(args: CheckArgs):
 @dataclass
 class TraceArgs:
     transaction_hashes: tuple[str, str]
-    output_dir: Path
+    traces_dir: Path
     provider: str
 
 
@@ -223,25 +223,51 @@ class TraceResult:
 def trace(args: TraceArgs) -> TraceResult:
     error = None
     tx_a, tx_b = args.transaction_hashes
+    id = f"{tx_a}_{tx_b}"
+
     with StopWatch() as stopwatch:
         global checker
         assert checker is not None
         try:
+            output_dir = args.traces_dir / id
+            output_dir.mkdir(exist_ok=True)
+            traces_normal_dir = output_dir / "actual"
+            traces_reverse_dir = output_dir / "reverse"
+            traces_normal_dir.mkdir(exist_ok=True)
+            traces_reverse_dir.mkdir(exist_ok=True)
+
+            with open(output_dir / "metadata.json", "w") as metadata_file:
+                tx_a_data = checker._tx_block_mapper.get_transaction(tx_a)
+                tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
+                tx_a_data["value"] = hex(tx_a_data["value"])  # type: ignore
+                tx_b_data["value"] = hex(tx_b_data["value"])  # type: ignore
+                metadata = {
+                    "id": id,
+                    "transactions": {
+                        tx_a: checker._tx_block_mapper.get_transaction(tx_a),
+                        tx_b: checker._tx_block_mapper.get_transaction(tx_b),
+                    },
+                    "transactions_order": [tx_a, tx_b],
+                }
+                json.dump(metadata, metadata_file)
+
             traces = checker.trace_both_scenarios(tx_a, tx_b)
             trace_normal_b, trace_reverse_b, trace_normal_a, trace_reverse_a = traces
-            with open(args.output_dir / f"{tx_a}_normal.json", "w") as f:
+
+            with open(traces_normal_dir / f"{tx_a}.json", "w") as f:
                 json.dump(trace_normal_a, f)
-            with open(args.output_dir / f"{tx_a}_reverse.json", "w") as f:
+            with open(traces_reverse_dir / f"{tx_a}.json", "w") as f:
                 json.dump(trace_reverse_a, f)
-            with open(args.output_dir / f"{tx_b}_normal.json", "w") as f:
+            with open(traces_normal_dir / f"{tx_b}.json", "w") as f:
                 json.dump(trace_normal_b, f)
-            with open(args.output_dir / f"{tx_b}_reverse.json", "w") as f:
+            with open(traces_reverse_dir / f"{tx_b}.json", "w") as f:
                 json.dump(trace_reverse_b, f)
+
         except Exception as e:
             error = e
 
     return TraceResult(
-        f"{tx_a}_{tx_b}",
+        id,
         error,
         stopwatch.elapsed_ms(),
     )

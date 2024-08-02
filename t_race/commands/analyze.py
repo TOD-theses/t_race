@@ -10,6 +10,7 @@ from typing import Iterable, Sequence
 
 from tqdm import tqdm
 from traces_analyzer.loader.directory_loader import DirectoryLoader
+from traces_analyzer.loader.event_parser import VmTraceEventsParser
 from traces_analyzer.loader.loader import PotentialAttack
 from traces_analyzer.cli import (
     HexString,
@@ -20,7 +21,6 @@ from traces_analyzer.cli import (
     InstructionUsagesFeatureExtractor,
     SingleToDoubleInstructionFeatureExtractor,
     parse_transaction,
-    parse_events,
     TransactionParsingInfo,
     RunInfo,
     FeatureExtractionRunner,
@@ -29,6 +29,7 @@ from traces_analyzer.cli import (
     InstructionDifferencesEvaluation,
     CALL,
     STATICCALL,
+    TraceEvent,
 )
 
 from t_race.timing.stopwatch import StopWatch
@@ -96,7 +97,7 @@ def analyze(args: AnalyzeArgs):
     id = "exception"
 
     with StopWatch() as stopwatch:
-        with DirectoryLoader(args.traces_path) as bundle:
+        with DirectoryLoader(args.traces_path, VmTraceEventsParser()) as bundle:
             id = bundle.id
             out_path = args.results_directory / f"{bundle.id}.json"
             try:
@@ -120,7 +121,7 @@ def analyze_attack(bundle: PotentialAttack):
             bundle.tx_victim.to,
             bundle.tx_victim.calldata,
             bundle.tx_victim.value,
-            (bundle.tx_victim.trace_actual, bundle.tx_victim.trace_reverse),
+            (bundle.tx_victim.events_normal, bundle.tx_victim.events_reverse),
         )
     except Exception:
         raise Exception(f"Could not analyze traces for {bundle.id}")
@@ -131,7 +132,7 @@ def compare_traces(
     to: HexString,
     calldata: HexString,
     value: HexString,
-    traces: tuple[Iterable[str], Iterable[str]],
+    traces: tuple[Iterable[TraceEvent], Iterable[TraceEvent]],
 ) -> list[Evaluation]:
     tod_source_analyzer = TODSourceFeatureExtractor()
     instruction_changes_analyzer = InstructionDifferencesFeatureExtractor()
@@ -140,10 +141,10 @@ def compare_traces(
     )
 
     transaction_one = parse_transaction(
-        TransactionParsingInfo(sender, to, calldata, value), parse_events(traces[0])
+        TransactionParsingInfo(sender, to, calldata, value), traces[0]
     )
     transaction_two = parse_transaction(
-        TransactionParsingInfo(sender, to, calldata, value), parse_events(traces[1])
+        TransactionParsingInfo(sender, to, calldata, value), traces[1]
     )
 
     runner = FeatureExtractionRunner(
