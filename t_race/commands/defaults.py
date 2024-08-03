@@ -11,3 +11,4 @@ class DEFAULTS:
     RESULTS_PATH = Path("results")
     TIMINGS_PATH = Path("timings.csv")
     STATS_PATH = Path("stats")
+    TOD_METHOD = "adapted"
