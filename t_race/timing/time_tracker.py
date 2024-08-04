@@ -8,10 +8,11 @@ from t_race.timing.stopwatch import StopWatch
 
 
 class TimeTracker:
-    def __init__(self, csv_path: Path) -> None:
+    def __init__(self, csv_path: Path, base_task: str) -> None:
         self._csv_path = csv_path
         self._csv_writer = None
         self._csv_file = None
+        self._base_task = base_task
 
     def __enter__(self) -> "TimeTracker":
         self._csv_file = open(self._csv_path, "w", newline="")
@@ -30,9 +31,13 @@ class TimeTracker:
         return False
 
     def task(self, task: Sequence[str]) -> "TimeTrackerWatch":
+        if task[0] != self._base_task:
+            task = [self._base_task, *task]
         return TimeTrackerWatch(self, task)
 
     def save_time_ms(self, task: Sequence[str], elapsed_ms: int):
+        if task[0] != self._base_task:
+            task = [self._base_task, *task]
         self._csv_writer.writerow(("|".join(task), elapsed_ms))  # type: ignore
 
 

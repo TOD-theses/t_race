@@ -71,7 +71,7 @@ def main():
     args.base_dir.mkdir(exist_ok=True)
 
     if args.timing:
-        with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
+        with TimeTracker(args.base_dir / args.timings_output, "t_race") as time_tracker:
             with time_tracker.task(("t_race",)):
                 args.func(args, time_tracker)
     else:

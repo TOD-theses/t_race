@@ -30,6 +30,7 @@ from traces_analyzer.loader.in_memory_loader import InMemoryLoader
 from traces_analyzer.loader.event_parser import (
     VmTraceDictEventsParser,
 )
+from t_race_stats.stats import process_stats
 
 
 def init_parser_run(parser: ArgumentParser):
@@ -70,7 +71,7 @@ def init_parser_run(parser: ArgumentParser):
 def run_command(args: Namespace):
     traces_provider: str = args.traces_provider or args.provider
 
-    with TimeTracker(args.base_dir / args.timings_output) as time_tracker:
+    with TimeTracker(args.base_dir / args.timings_output, "t_race") as time_tracker:
         with time_tracker.task(("t_race",)):
             with time_tracker.task(("mine",)):
                 run_mining(args, time_tracker)
@@ -83,7 +84,7 @@ def run_command(args: Namespace):
             with time_tracker.task(("trace_analyze",)):
                 run_trace_analyze(args, time_tracker, checker)
 
-    # process_stats(args.base_dir, args.base_dir / DEFAULTS.STATS_PATH)
+    process_stats(args.base_dir, args.base_dir / DEFAULTS.STATS_PATH)
 
 
 def run_mining(args: Namespace, time_tracker: TimeTracker):
