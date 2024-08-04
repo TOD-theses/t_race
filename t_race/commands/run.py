@@ -192,21 +192,21 @@ def trace_analyze(args: TraceAnalyzeArgs) -> TraceAnalyzeResult:
         )
 
     with StopWatch() as stopwatch_analyze:
-        with InMemoryLoader(
-            id,
-            tx_b_data,  # type: ignore
-            trace_normal_b,
-            trace_reverse_b,
-            VmTraceDictEventsParser(),
-        ) as bundle:
-            try:
+        try:
+            with InMemoryLoader(
+                id,
+                tx_b_data,  # type: ignore
+                trace_normal_b,
+                trace_reverse_b,
+                VmTraceDictEventsParser(),
+            ) as bundle:
                 evaluations = analyze_attack(bundle)
                 save_evaluations(evaluations, out_path)
-            except Exception:
-                error_analyze = True
-                msg = traceback.format_exc()
-                with open(out_path, "w") as f:
-                    json.dump({"exception_analyze": msg}, f)
+        except Exception:
+            error_analyze = True
+            msg = traceback.format_exc()
+            with open(out_path, "w") as f:
+                json.dump({"exception_analyze": msg}, f)
 
     return TraceAnalyzeResult(
         id,
