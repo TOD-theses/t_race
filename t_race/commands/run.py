@@ -109,6 +109,7 @@ def run_check(args: Namespace, time_tracker: TimeTracker, checker: TodChecker):
         checker,
         args.base_dir / DEFAULTS.TOD_CANDIDATES_CSV_PATH,
         args.base_dir / DEFAULTS.TOD_CHECK_CSV_PATH,
+        args.base_dir / DEFAULTS.TOD_CHECK_JSONL_PATH,
         DEFAULTS.TOD_METHOD,
         args.max_workers,
         time_tracker,

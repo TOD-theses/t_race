@@ -17,6 +17,7 @@ from tod_checker.checker.checker import (
     TodChecker,
     ReplayDivergedException,
     InsufficientEtherReplayException,
+    TODCheckResult,
 )
 from tod_checker.rpc.rpc import RPC, OverridesFormatter
 from tod_checker.executor.executor import TransactionExecutor
@@ -24,7 +25,7 @@ from tod_checker.state_changes.fetcher import StateChangesFetcher
 from tod_checker.tx_block_mapper.tx_block_mapper import TransactionBlockMapper
 
 checker: TodChecker | None = None
-TODMethod = Literal["original"] | Literal["adapted"] | Literal["fast-fail-adapted"]
+TODMethod = Literal["approximation"] | Literal["overall"]
 TODResult = (
     Literal["TOD"]
     | Literal["not TOD"]
@@ -49,7 +50,7 @@ def init_parser_check(parser: ArgumentParser):
     )
     parser.add_argument(
         "--tod-method",
-        choices=("original", "adapted", "fast-fail-adapted"),
+        choices=("approximation", "overall"),
         default=DEFAULTS.TOD_METHOD,
     )
     parser.add_argument(
@@ -75,18 +76,24 @@ def init_parser_check(parser: ArgumentParser):
         default=DEFAULTS.TOD_CHECK_CSV_PATH,
         help="File where the results should be stored",
     )
+    parser.add_argument(
+        "--results-details-jsonl",
+        type=Path,
+        default=DEFAULTS.TOD_CHECK_JSONL_PATH,
+        help="File where the additional info for the results should be stored",
+    )
     parser.set_defaults(func=check_command)
 
 
 def check_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.tod_candidates_csv
     tod_check_results_file_path: Path = args.base_dir / args.results_csv
+    tod_check_details_file_path: Path = args.base_dir / args.results_details_jsonl
     tod_method = args.tod_method
     create_traces: bool = args.create_traces
     traces_directory_path: Path = args.base_dir / args.traces_dir
     traces_provider: str = args.traces_provider or args.provider
 
-    # transaction_pairs = load_tod_candidates(transactions_csv_path)
     checker = create_checker(args.provider)
 
     with time_tracker.task(("check",)):
@@ -94,6 +101,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
             checker,
             transactions_csv_path,
             tod_check_results_file_path,
+            tod_check_details_file_path,
             tod_method,
             args.max_workers,
             time_tracker,
@@ -117,6 +125,7 @@ def check(
     checker_param: TodChecker,
     tod_candidates_path: Path,
     tod_check_results_path: Path,
+    tod_check_details_path: Path,
     tod_method: TODMethod,
     max_workers: int,
     time_tracker: TimeTracker,
@@ -134,8 +143,10 @@ def check(
             checker.download_data_for_block(block)
 
     with time_tracker.task(("check", "check")):
-        with open(tod_check_results_path, "w", newline="") as f:
-            writer = csv.DictWriter(f, ["tx_a", "tx_b", "result"])
+        with open(tod_check_results_path, "w", newline="") as csv_file, open(
+            tod_check_details_path, "w"
+        ) as details_file:
+            writer = csv.DictWriter(csv_file, ["tx_a", "tx_b", "result"])
             writer.writeheader()
             with ThreadPool(max_workers) as p:
                 process_inputs = [
@@ -158,6 +169,17 @@ def check(
                             "result": result.result,
                         }
                     )
+                    details: dict = {
+                        "tx_a": tx_a,
+                        "tx_b": tx_b,
+                        "details": None,
+                        "failure": None,
+                    }
+                    if result.details:
+                        details["details"] = result.details.as_dict()
+                    if result.result not in ("TOD", "not TOD"):
+                        details["failure"] = result.result
+                    details_file.write(json.dumps(details) + "\n")
 
 
 def trace(
@@ -209,25 +231,26 @@ class CheckArgs:
 class CheckResult:
     id: str
     result: TODResult
+    details: TODCheckResult | None
     elapsed_ms: int
 
 
 def check_candidate(args: CheckArgs):
+    res = None
+
     with StopWatch() as stopwatch:
         global checker
         assert checker is not None
         tx_a, tx_b = args.transaction_hashes
         try:
-            res = checker.is_TOD(
+            res = checker.check(
                 tx_a,
                 tx_b,
-                args.tod_method,
-                all_changes=False,
             )
-            if not res:
-                result = "not TOD"
+            if args.tod_method == "approximation":
+                result = "TOD" if res.tx_b_comparison.differences() else "not TOD"
             else:
-                result = "TOD"
+                result = "TOD" if res.overall_comparison.differences() else "not TOD"
         except ReplayDivergedException:
             result = "replay diverged"
         except InsufficientEtherReplayException:
@@ -241,6 +264,7 @@ def check_candidate(args: CheckArgs):
     return CheckResult(
         f"{args.transaction_hashes[0]}_{args.transaction_hashes[1]}",
         result,  # type: ignore
+        res,
         stopwatch.elapsed_ms(),
     )
 

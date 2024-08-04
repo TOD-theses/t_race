@@ -120,6 +120,8 @@ def mine(
         conn._check_connection_ok()
         miner = Miner(RPC(provider), DB(conn))
 
+        miner.reset_db()
+
         with time_tracker.task(("mine", "fetch")):
             miner.fetch(block_range.start, block_range.end)
 
