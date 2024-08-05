@@ -80,9 +80,14 @@ def run_command(args: Namespace):
             with time_tracker.task(("check",)):
                 run_check(args, time_tracker, checker)
 
-            change_checker_executor_provider(checker, traces_provider)
             with time_tracker.task(("trace_analyze",)):
-                run_trace_analyze(args, time_tracker, checker)
+                run_trace_analyze(
+                    args.base_dir,
+                    args.max_workers,
+                    args.provider,
+                    traces_provider,
+                    time_tracker,
+                )
 
     process_stats(args.base_dir, args.base_dir / DEFAULTS.STATS_PATH)
 
@@ -118,24 +123,26 @@ def run_check(args: Namespace, time_tracker: TimeTracker, checker: TodChecker):
 
 
 def run_trace_analyze(
-    args: Namespace, time_tracker: TimeTracker, checker_param: TodChecker
+    base_dir: Path,
+    max_workers: int,
+    provider: str,
+    traces_provider: str,
+    time_tracker: TimeTracker,
 ):
-    tod_check_csv_path: Path = args.base_dir / DEFAULTS.TOD_CHECK_CSV_PATH
-    results_dir: Path = args.base_dir / DEFAULTS.RESULTS_PATH
+    tod_check_csv_path: Path = base_dir / DEFAULTS.TOD_CHECK_CSV_PATH
+    results_dir: Path = base_dir / DEFAULTS.RESULTS_PATH
     results_dir.mkdir(exist_ok=True)
-    traces_dir: Path = args.base_dir / DEFAULTS.TRACES_PATH
+    traces_dir: Path = base_dir / DEFAULTS.TRACES_PATH
     traces_dir.mkdir(exist_ok=True)
-
-    global checker
-    checker = checker_param
 
     transactions = load_tod_transactions(tod_check_csv_path)
 
     process_inputs = [
-        TraceAnalyzeArgs(tx_pair, results_dir) for tx_pair in transactions
+        TraceAnalyzeArgs(tx_pair, results_dir, provider, traces_provider)
+        for tx_pair in transactions
     ]
 
-    with Pool(args.max_workers) as p:
+    with Pool(max_workers) as p:
         for result in tqdm(
             p.imap_unordered(trace_analyze, process_inputs, chunksize=1),
             desc="Trace and analyze TOD candidates",
@@ -149,6 +156,8 @@ def run_trace_analyze(
 class TraceAnalyzeArgs:
     transactions: tuple[str, str]
     results_directory: Path
+    provider: str
+    traces_provider: str
 
 
 @dataclass
@@ -166,17 +175,22 @@ def trace_analyze(args: TraceAnalyzeArgs) -> TraceAnalyzeResult:
     out_path = args.results_directory / f"{id}.json"
     error_trace = False
     error_analyze = False
-
-    global checker
-    tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
-    tx_b_data["value"] = hex(tx_b_data["value"])  # type: ignore
-
     trace_normal_b = None
     trace_reverse_b = None
-
-    assert isinstance(checker, TodChecker)
+    checker = create_checker(args.provider)
     with StopWatch() as stopwatch_traces:
         try:
+            blocks = set()
+            blocks.add(checker.download_data_for_transaction(tx_a))
+            blocks.add(checker.download_data_for_transaction(tx_b))
+            for b in blocks:
+                checker.download_data_for_block(b)
+
+            tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
+            tx_b_data["value"] = hex(tx_b_data["value"])  # type: ignore
+
+            change_checker_executor_provider(checker, args.traces_provider)
+
             trace_normal_b, trace_reverse_b, trace_normal_a, trace_reverse_a = (
                 checker.trace_both_scenarios(tx_a, tx_b)
             )
