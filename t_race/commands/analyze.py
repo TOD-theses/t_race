@@ -15,20 +15,20 @@ from traces_analyzer.loader.loader import PotentialAttack
 from traces_analyzer.cli import (
     HexString,
     Evaluation,
-    TODSourceEvaluation,
     TODSourceFeatureExtractor,
     InstructionDifferencesFeatureExtractor,
     InstructionUsagesFeatureExtractor,
+    InstructionLocationsGrouperFeatureExtractor,
+    CurrencyChangesFeatureExtractor,
     SingleToDoubleInstructionFeatureExtractor,
     parse_transaction,
     TransactionParsingInfo,
     RunInfo,
     FeatureExtractionRunner,
-    build_information_flow_graph,
-    InstructionUsageEvaluation,
-    InstructionDifferencesEvaluation,
+    SecurifyPropertiesEvaluation,
+    FinancialGainLossEvaluation,
+    OverallPropertiesEvaluation,
     CALL,
-    STATICCALL,
     TraceEvent,
 )
 
@@ -103,7 +103,7 @@ def analyze(args: AnalyzeArgs):
             try:
                 evaluations = analyze_attack(bundle)
                 save_evaluations(
-                    evaluations, args.results_directory / f"{bundle.id}.json"
+                    [evaluations.overall], args.results_directory / f"{bundle.id}.json"
                 )
             except Exception:
                 error = True
@@ -114,15 +114,41 @@ def analyze(args: AnalyzeArgs):
     return AnalyzeResult(id, error, stopwatch.elapsed_ms())
 
 
-def analyze_attack(bundle: PotentialAttack):
+@dataclass
+class AttackEvaluations:
+    overall: OverallPropertiesEvaluation
+    tx_a: tuple[SecurifyPropertiesEvaluation, FinancialGainLossEvaluation]
+    tx_b: tuple[SecurifyPropertiesEvaluation, FinancialGainLossEvaluation]
+
+
+def analyze_attack(bundle: PotentialAttack) -> AttackEvaluations:
     try:
-        return compare_traces(
-            bundle.tx_victim.caller,
-            bundle.tx_victim.to,
-            bundle.tx_victim.calldata,
-            bundle.tx_victim.value,
-            (bundle.tx_victim.events_normal, bundle.tx_victim.events_reverse),
+        sec_a, gain_loss_a = compare_traces(
+            bundle.tx_a.caller,
+            bundle.tx_a.to,
+            bundle.tx_a.calldata,
+            bundle.tx_a.value,
+            (bundle.tx_a.events_normal, bundle.tx_a.events_reverse),
         )
+        sec_b, gain_loss_b = compare_traces(
+            bundle.tx_b.caller,
+            bundle.tx_b.to,
+            bundle.tx_b.calldata,
+            bundle.tx_b.value,
+            (bundle.tx_b.events_normal, bundle.tx_b.events_reverse),
+        )
+        overall_properties = OverallPropertiesEvaluation(
+            attackers=(bundle.tx_a.caller, bundle.tx_a.to),
+            victim=bundle.tx_b.caller,
+            securify_properties_evaluations=(sec_a, sec_b),
+            financial_gain_loss_evaluations=(gain_loss_a, gain_loss_b),
+        )
+        return AttackEvaluations(
+            overall=overall_properties,
+            tx_a=(sec_a, gain_loss_a),
+            tx_b=(sec_b, gain_loss_b),
+        )
+
     except Exception:
         raise Exception(f"Could not analyze traces for {bundle.id}")
 
@@ -133,11 +159,18 @@ def compare_traces(
     calldata: HexString,
     value: HexString,
     traces: tuple[Iterable[TraceEvent], Iterable[TraceEvent]],
-) -> list[Evaluation]:
+) -> tuple[SecurifyPropertiesEvaluation, FinancialGainLossEvaluation]:
     tod_source_analyzer = TODSourceFeatureExtractor()
     instruction_changes_analyzer = InstructionDifferencesFeatureExtractor()
     instruction_usage_analyzers = SingleToDoubleInstructionFeatureExtractor(
         InstructionUsagesFeatureExtractor(), InstructionUsagesFeatureExtractor()
+    )
+    currency_changes_analyzer = SingleToDoubleInstructionFeatureExtractor(
+        CurrencyChangesFeatureExtractor(), CurrencyChangesFeatureExtractor()
+    )
+    calls_grouper = SingleToDoubleInstructionFeatureExtractor(
+        InstructionLocationsGrouperFeatureExtractor([CALL.opcode]),
+        InstructionLocationsGrouperFeatureExtractor([CALL.opcode]),
     )
 
     transaction_one = parse_transaction(
@@ -153,29 +186,26 @@ def compare_traces(
                 tod_source_analyzer,
                 instruction_changes_analyzer,
                 instruction_usage_analyzers,
+                currency_changes_analyzer,
+                calls_grouper,
             ],
             transactions=(transaction_one, transaction_two),
         )
     )
     runner.run()
 
-    build_information_flow_graph(transaction_one.instructions)
-    build_information_flow_graph(transaction_two.instructions)
+    # build_information_flow_graph(transaction_one.instructions)
+    # build_information_flow_graph(transaction_two.instructions)
+    evaluation_securify = SecurifyPropertiesEvaluation(
+        calls_grouper.normal.instruction_groups,  # type: ignore
+        calls_grouper.reverse.instruction_groups,  # type: ignore
+    )
+    evaluation_gain_loss = FinancialGainLossEvaluation(
+        currency_changes_analyzer.normal.currency_changes,
+        currency_changes_analyzer.reverse.currency_changes,
+    )
 
-    evaluations: list[Evaluation] = [
-        TODSourceEvaluation(tod_source_analyzer.get_tod_source()),
-        InstructionDifferencesEvaluation(
-            occurrence_changes=instruction_changes_analyzer.get_instructions_only_executed_by_one_trace(),
-            input_changes=instruction_changes_analyzer.get_instructions_with_different_inputs(),
-        ),
-        InstructionUsageEvaluation(
-            instruction_usage_analyzers.one.get_used_opcodes_per_contract(),
-            instruction_usage_analyzers.two.get_used_opcodes_per_contract(),
-            filter_opcodes=[CALL.opcode, STATICCALL.opcode],
-        ),
-    ]
-
-    return evaluations
+    return evaluation_securify, evaluation_gain_loss
 
 
 def save_evaluations(evaluations: list[Evaluation], path: Path):

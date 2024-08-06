@@ -68,6 +68,9 @@ def init_parser_mine(parser: ArgumentParser):
         help="If passed, limit the amount of collisions per address/code/family to this number",
     )
     parser.add_argument(
+        "--quick-stats", action="store_true", help="Only compute performacnt stats"
+    )
+    parser.add_argument(
         "--output-path",
         type=Path,
         default=DEFAULTS.TOD_CANDIDATES_CSV_PATH,
@@ -102,6 +105,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
             output_stats_path,
             conn_str,
             args.provider,
+            args.quick_stats,
             time_tracker,
         )
 
@@ -114,6 +118,7 @@ def mine(
     output_stats_path: Path,
     conn_str: str,
     provider: str,
+    quick_stats: bool,
     time_tracker: TimeTracker,
 ):
     with psycopg.connect(conn_str) as conn:
@@ -167,7 +172,7 @@ def mine(
 
         with time_tracker.task(("mine", "stats")):
             print("Preparing stats...", end="\r")
-            stats = miner.get_stats()
+            stats = miner.get_stats(quick_stats)
 
             with open(output_stats_path, "w") as f:
                 json.dump(stats, f, indent=2)

@@ -5,6 +5,7 @@ import json
 from multiprocessing import Pool
 from pathlib import Path
 import traceback
+from typing import Any
 
 from tqdm import tqdm
 
@@ -61,6 +62,15 @@ def init_parser_run(parser: ArgumentParser):
         default=None,
         help="If passed, limit the amount of collisions per address/code/family to this number",
     )
+    parser.add_argument(
+        "--extensive-stats", action="store_true", help="Include time consuming stats"
+    )
+    parser.add_argument(
+        "--max-gas",
+        type=int,
+        default=1_000_000,
+        help="Skip tracing and analyzing transactions with a gas value higher than max-gas",
+    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
@@ -86,6 +96,7 @@ def run_command(args: Namespace):
                     args.max_workers,
                     args.provider,
                     traces_provider,
+                    args.max_gas,
                     time_tracker,
                 )
 
@@ -106,6 +117,7 @@ def run_mining(args: Namespace, time_tracker: TimeTracker):
         output_stats_path,
         conn_str,
         args.provider,
+        not args.extensive_stats,
         time_tracker,
     )
 
@@ -127,6 +139,7 @@ def run_trace_analyze(
     max_workers: int,
     provider: str,
     traces_provider: str,
+    max_gas: int,
     time_tracker: TimeTracker,
 ):
     tod_check_csv_path: Path = base_dir / DEFAULTS.TOD_CHECK_CSV_PATH
@@ -138,7 +151,7 @@ def run_trace_analyze(
     transactions = load_tod_transactions(tod_check_csv_path)
 
     process_inputs = [
-        TraceAnalyzeArgs(tx_pair, results_dir, provider, traces_provider)
+        TraceAnalyzeArgs(max_gas, tx_pair, results_dir, provider, traces_provider)
         for tx_pair in transactions
     ]
 
@@ -154,6 +167,7 @@ def run_trace_analyze(
 
 @dataclass
 class TraceAnalyzeArgs:
+    max_gas: int
     transactions: tuple[str, str]
     results_directory: Path
     provider: str
@@ -169,12 +183,20 @@ class TraceAnalyzeResult:
     ms_analyze: int
 
 
+class TooMuchComputationException(Exception):
+    pass
+
+
 def trace_analyze(args: TraceAnalyzeArgs) -> TraceAnalyzeResult:
     tx_a, tx_b = args.transactions
     id = f"{tx_a}_{tx_b}"
     out_path = args.results_directory / f"{id}.json"
     error_trace = False
     error_analyze = False
+    tx_a_data: Any = None
+    tx_b_data: Any = None
+    trace_normal_a = None
+    trace_reverse_a = None
     trace_normal_b = None
     trace_reverse_b = None
     checker = create_checker(args.provider)
@@ -186,8 +208,19 @@ def trace_analyze(args: TraceAnalyzeArgs) -> TraceAnalyzeResult:
             for b in blocks:
                 checker.download_data_for_block(b)
 
-            tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
-            tx_b_data["value"] = hex(tx_b_data["value"])  # type: ignore
+            tx_a_data = dict(checker._tx_block_mapper.get_transaction(tx_b))
+            tx_a_data["value"] = hex(tx_a_data["value"])
+            tx_b_data = dict(checker._tx_block_mapper.get_transaction(tx_b))
+            tx_b_data["value"] = hex(tx_b_data["value"])
+
+            if tx_a_data["gas"] > args.max_gas:
+                raise TooMuchComputationException(
+                    f'Skipping because transaction potentially uses a lot of gas: {tx_a_data["gas"]}'
+                )
+            if tx_b_data["gas"] > args.max_gas:
+                raise TooMuchComputationException(
+                    f'Skipping because transaction potentially uses a lot of gas: {tx_b_data["gas"]}'
+                )
 
             change_checker_executor_provider(checker, args.traces_provider)
 
@@ -209,13 +242,16 @@ def trace_analyze(args: TraceAnalyzeArgs) -> TraceAnalyzeResult:
         try:
             with InMemoryLoader(
                 id,
-                tx_b_data,  # type: ignore
+                tx_a_data,
+                tx_b_data,
+                trace_normal_a,
+                trace_reverse_a,
                 trace_normal_b,
                 trace_reverse_b,
                 VmTraceDictEventsParser(),
             ) as bundle:
                 evaluations = analyze_attack(bundle)
-                save_evaluations(evaluations, out_path)
+                save_evaluations([evaluations.overall], out_path)
         except Exception:
             error_analyze = True
             msg = traceback.format_exc()

@@ -108,7 +108,6 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
         )
 
     if create_traces:
-        print("Creating execution traces")
         change_checker_executor_provider(checker, traces_provider)
 
         with time_tracker.task(("trace",)):
@@ -203,6 +202,7 @@ def trace(
             for result in tqdm(
                 p.imap_unordered(trace_tod, process_inputs, chunksize=1),
                 total=len(process_inputs),
+                desc="Trace scenarios",
             ):
                 time_tracker.save_time_ms(("trace", result.id), result.elapsed_ms)
                 if result.error:

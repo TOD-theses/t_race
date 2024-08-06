@@ -2,7 +2,7 @@ psycopg[binary]
 tqdm==4.66.1
 typing_extensions==4.10.0
 requests==2.31.0
-traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer@7bccae7df36e02aa164053861dd2b83137615d53
-tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@5e56d72cbce8f9b771a535488453e46efb01cafa
+traces_analyzer @ git+https://github.com/TOD-theses/traces_analyzer@dc7cc1ca95657c0d83dfed9e21932e608d5420bc
+tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@02c715923f9117bb7ff505d5b6d9870d130fe692
 tod_checker @ git+https://github.com/TOD-theses/tod_checker@85ce220d26a19e7107647607701ccfa2ff2492a5
 t_race_stats @ git+https://github.com/TOD-theses/t_race_stats@3d192d788661f5d94876b6d17aa55fdaa3e1942f
