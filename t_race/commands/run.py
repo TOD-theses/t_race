@@ -1,5 +1,6 @@
 from argparse import ArgumentParser, Namespace
 from importlib.metadata import version
+from pathlib import Path
 
 
 from t_race.commands.check import (
@@ -85,6 +86,8 @@ def run_mining(args: Namespace, time_tracker: TimeTracker):
         conn_str,
         args.provider,
         not args.extensive_stats,
+        None,
+        Path(),
         time_tracker,
     )
 

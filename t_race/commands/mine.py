@@ -5,16 +5,18 @@ from dataclasses import dataclass
 from importlib.metadata import version
 import json
 from pathlib import Path
+from typing import Iterable
 
 import psycopg
 from tod_attack_miner import Miner
 from tod_attack_miner.rpc.rpc import RPC
-from tod_attack_miner.db.db import DB
+from tod_attack_miner.db.db import DB, EvaluationCandidate
 from tod_attack_miner.db.filters import (
     get_filters_except_duplicate_limits,
     get_filters_duplicate_limits,
 )
 
+from t_race.commands.check import load_tod_candidates
 from t_race.commands.defaults import DEFAULTS
 from t_race.timing.time_tracker import TimeTracker
 
@@ -82,6 +84,17 @@ def init_parser_mine(parser: ArgumentParser):
         default=DEFAULTS.TOD_MINER_STATS_PATH,
         help="Path where the stats will be stored",
     )
+    parser.add_argument(
+        "--evaluate-candidates-csv",
+        type=Path,
+        help="If passed, track what filtered these candidates and store it in --evaluation-csv",
+    )
+    parser.add_argument(
+        "--evaluation-csv",
+        type=Path,
+        default=DEFAULTS.TOD_MINING_EVALUATION_CSV_PATH,
+        help="See --evaluate-candidates-csv",
+    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
@@ -92,6 +105,7 @@ def init_parser_mine(parser: ArgumentParser):
 def mine_command(args: Namespace, time_tracker: TimeTracker):
     output_path = args.base_dir / args.output_path
     output_stats_path = args.base_dir / args.output_stats_path
+    evaluation_csv = args.base_dir / args.evaluation_csv
 
     conn_str = f"user={args.postgres_user} password={args.postgres_password} host={args.postgres_host} port={args.postgres_port}"
     print("Connecting to postgres: ", conn_str)
@@ -106,6 +120,8 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
             conn_str,
             args.provider,
             args.quick_stats,
+            args.evaluate_candidates_csv,
+            evaluation_csv,
             time_tracker,
         )
 
@@ -119,6 +135,8 @@ def mine(
     conn_str: str,
     provider: str,
     quick_stats: bool,
+    evaluate_candidates_csv_path: Path | None,
+    evaluation_csv_path: Path,
     time_tracker: TimeTracker,
 ):
     with psycopg.connect(conn_str) as conn:
@@ -147,7 +165,15 @@ def mine(
             filters = get_filters_except_duplicate_limits(window_size=window_size)
             if duplicates_limit is not None:
                 filters += get_filters_duplicate_limits(limit=duplicates_limit)
-            miner.filter_candidates(filters)
+            if evaluate_candidates_csv_path:
+                evaluation_candidates = load_tod_candidates(
+                    evaluate_candidates_csv_path
+                )
+                results = miner.evaluate_candidates(filters, evaluation_candidates)
+                print(f"Saving evaluation results to {evaluation_csv_path}")
+                save_evaluation_results(evaluation_csv_path, results)
+            else:
+                miner.filter_candidates(filters)
             print(f"Reduced to {miner.count_candidates()} TOD candidates")
 
         with time_tracker.task(("mine", "save_candidates")):
@@ -178,3 +204,20 @@ def mine(
                 json.dump(stats, f, indent=2)
 
             print(f"Wrote stats to {output_stats_path}")
+
+
+def save_evaluation_results(
+    results_csv_path: Path, results: Iterable[EvaluationCandidate]
+):
+    with open(results_csv_path, "w") as f:
+        csv_writer = csv.DictWriter(f, ["tx_a", "tx_b", "filtered_by"])
+        csv_writer.writeheader()
+        rows = [
+            {
+                "tx_a": c["tx_a"],
+                "tx_b": c["tx_b"],
+                "filtered_by": c["filter"] or "",
+            }
+            for c in results
+        ]
+        csv_writer.writerows(rows)
