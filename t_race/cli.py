@@ -5,7 +5,6 @@ from importlib.metadata import version
 from os import cpu_count
 from pathlib import Path
 
-from t_race.commands.analyze import init_parser_analyze
 from t_race.commands.check import init_parser_check
 from t_race.commands.defaults import DEFAULTS
 from t_race.commands.mine import init_parser_mine
@@ -59,9 +58,6 @@ def main():
         "check", help="Check if TOD candidates are really TOD"
     )
     init_parser_check(parser_check)
-
-    parser_analyzer = subparsers.add_parser("analyze", help="Analyze traces")
-    init_parser_analyze(parser_analyzer)
 
     parser_stats = subparsers.add_parser("stats", help="Create stats")
     init_parser_stats(parser_stats)

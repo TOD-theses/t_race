@@ -5,6 +5,7 @@ from importlib.metadata import version
 import json
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
+import traceback
 from typing import Iterable, Literal, Sequence
 
 from tqdm import tqdm
@@ -23,6 +24,17 @@ from tod_checker.rpc.rpc import RPC, OverridesFormatter
 from tod_checker.executor.executor import TransactionExecutor
 from tod_checker.state_changes.fetcher import StateChangesFetcher
 from tod_checker.tx_block_mapper.tx_block_mapper import TransactionBlockMapper
+from tod_checker.currency_changes.properties.gain_and_loss import (
+    check_gain_and_loss_properties,
+    GainAndLossResult,
+)
+from tod_checker.currency_changes.properties.securify import (
+    check_securify_properties,
+    SecurifyCheckResult,
+)
+from tod_checker.currency_changes.tracer.currency_changes_js_tracer import (
+    CurrencyChangesJSTracer,
+)
 
 checker: TodChecker | None = None
 TODMethod = Literal["approximation"] | Literal["overall"]
@@ -46,29 +58,12 @@ def init_parser_check(parser: ArgumentParser):
         "--tod-candidates-csv",
         type=Path,
         default=DEFAULTS.TOD_CANDIDATES_CSV_PATH,
-        help="Path to a CSV file containing tx_a,tx_b pairs to trace",
+        help="Path to a CSV file containing tx_a,tx_b pairs to check",
     )
     parser.add_argument(
         "--tod-method",
         choices=("approximation", "overall"),
         default=DEFAULTS.TOD_METHOD,
-    )
-    parser.add_argument(
-        "--create-traces",
-        action="store_true",
-        help="Create traces for every found TOD",
-    )
-    parser.add_argument(
-        "--traces-provider",
-        type=str,
-        default=None,
-        help="If specified, use this RPC provider to generate traces (heavier load) instead of the normal one",
-    )
-    parser.add_argument(
-        "--traces-dir",
-        type=Path,
-        default=DEFAULTS.TRACES_PATH,
-        help="Directory where the traces should be stored",
     )
     parser.add_argument(
         "--results-csv",
@@ -82,6 +77,18 @@ def init_parser_check(parser: ArgumentParser):
         default=DEFAULTS.TOD_CHECK_JSONL_PATH,
         help="File where the additional info for the results should be stored",
     )
+    parser.add_argument(
+        "--properties-csv",
+        type=Path,
+        default=DEFAULTS.TOD_PROPERTIES_CSV_PATH,
+        help="File where the property results should be stored",
+    )
+    parser.add_argument(
+        "--properties-details-jsonl",
+        type=Path,
+        default=DEFAULTS.TOD_PROPERTIES_JSONL_PATH,
+        help="File where the additional info for the property results should be stored",
+    )
     parser.set_defaults(func=check_command)
 
 
@@ -89,10 +96,11 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
     transactions_csv_path: Path = args.base_dir / args.tod_candidates_csv
     tod_check_results_file_path: Path = args.base_dir / args.results_csv
     tod_check_details_file_path: Path = args.base_dir / args.results_details_jsonl
+    tod_properties_results_file_path: Path = args.base_dir / args.properties_csv
+    tod_properties_details_file_path: Path = (
+        args.base_dir / args.properties_details_jsonl
+    )
     tod_method = args.tod_method
-    create_traces: bool = args.create_traces
-    traces_directory_path: Path = args.base_dir / args.traces_dir
-    traces_provider: str = args.traces_provider or args.provider
 
     checker = create_checker(args.provider)
 
@@ -107,17 +115,15 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
             time_tracker,
         )
 
-    if create_traces:
-        change_checker_executor_provider(checker, traces_provider)
-
-        with time_tracker.task(("trace",)):
-            trace(
-                checker,
-                tod_check_results_file_path,
-                traces_directory_path,
-                args.max_workers,
-                time_tracker,
-            )
+    with time_tracker.task(("properties",)):
+        check_properties(
+            checker,
+            tod_check_results_file_path,
+            tod_properties_results_file_path,
+            tod_properties_details_file_path,
+            args.max_workers,
+            time_tracker,
+        )
 
 
 def check(
@@ -181,32 +187,91 @@ def check(
                     details_file.write(json.dumps(details) + "\n")
 
 
-def trace(
+def check_properties(
     checker_param: TodChecker,
     tod_check_results_path: Path,
-    traces_directory_path: Path,
+    tod_properties_path: Path,
+    tod_properties_details_path: Path,
     max_workers: int,
     time_tracker: TimeTracker,
 ):
     global checker
     checker = checker_param
 
-    traces_directory_path.mkdir(exist_ok=True)
-    tods = load_tod_candidates(tod_check_results_path)
+    tods = load_tod_transactions(tod_check_results_path)
 
-    with time_tracker.task(("trace",)):
-        with ThreadPool(max_workers) as p:
-            process_inputs = [
-                TraceArgs((tx_a, tx_b), traces_directory_path) for tx_a, tx_b in tods
-            ]
+    with ThreadPool(max_workers) as p:
+        with open(tod_properties_path, "w", newline="") as csv_file, open(
+            tod_properties_details_path, "w"
+        ) as details_file:
+            writer = csv.DictWriter(
+                csv_file,
+                [
+                    "tx_a",
+                    "tx_b",
+                    "attacker_gain_and_victim_loss",
+                    "tod_transfer",
+                    "tod_amount",
+                    "tod_receiver",
+                ],
+            )
+            writer.writeheader()
+            process_inputs = [CheckPropertiesArgs((tx_a, tx_b)) for tx_a, tx_b in tods]
             for result in tqdm(
-                p.imap_unordered(trace_tod, process_inputs, chunksize=1),
+                p.imap_unordered(
+                    check_candidate_properties, process_inputs, chunksize=1
+                ),
                 total=len(process_inputs),
-                desc="Trace scenarios",
+                desc="Check properties",
             ):
-                time_tracker.save_time_ms(("trace", result.id), result.elapsed_ms)
+                tx_a, tx_b = result.transaction_hashes
+                id = f"{tx_a}_{tx_b}"
+                time_tracker.save_time_ms(("properties", id), result.elapsed_ms)
+
+                details = None
+                failure = None
+                if (
+                    result.gain_and_loss
+                    and result.securify_tx_a
+                    and result.securify_tx_b
+                ):
+                    writer.writerow(
+                        {
+                            "tx_a": tx_a,
+                            "tx_b": tx_b,
+                            "attacker_gain_and_victim_loss": result.gain_and_loss[
+                                "properties"
+                            ]["attacker_gain_and_victim_loss"],
+                            "tod_transfer": result.securify_tx_a["properties"][
+                                "TOD_Transfer"
+                            ]
+                            or result.securify_tx_b["properties"]["TOD_Transfer"],
+                            "tod_amount": result.securify_tx_a["properties"][
+                                "TOD_Amount"
+                            ]
+                            or result.securify_tx_b["properties"]["TOD_Amount"],
+                            "tod_receiver": result.securify_tx_a["properties"][
+                                "TOD_Receiver"
+                            ]
+                            or result.securify_tx_b["properties"]["TOD_Receiver"],
+                        }
+                    )
+                    details = {
+                        "tx_a": tx_a,
+                        "tx_b": tx_b,
+                        "gain_and_loss": result.gain_and_loss,
+                        "securify_tx_a": result.securify_tx_a,
+                        "securify_tx_b": result.securify_tx_b,
+                    }
                 if result.error:
-                    print(result.error)
+                    failure = traceback.format_exception(result.error)
+                details_obj: dict = {
+                    "tx_a": tx_a,
+                    "tx_b": tx_b,
+                    "details": details,
+                    "failure": failure,
+                }
+                details_file.write(json.dumps(details_obj) + "\n")
 
 
 def create_checker(provider: str):
@@ -215,10 +280,6 @@ def create_checker(provider: str):
     tx_block_mapper = TransactionBlockMapper(rpc)
     simulator = TransactionExecutor(rpc)
     return TodChecker(simulator, state_changes_fetcher, tx_block_mapper)
-
-
-def change_checker_executor_provider(checker: TodChecker, provider: str):
-    checker.executor._rpc = RPC(provider, OverridesFormatter("old Erigon"))
 
 
 @dataclass
@@ -270,67 +331,69 @@ def check_candidate(args: CheckArgs):
 
 
 @dataclass
-class TraceArgs:
+class CheckPropertiesArgs:
     transaction_hashes: tuple[str, str]
-    traces_dir: Path
 
 
 @dataclass
-class TraceResult:
-    id: str
+class CheckPropertiesResult:
+    transaction_hashes: tuple[str, str]
     error: Exception | None
+    gain_and_loss: GainAndLossResult | None
+    securify_tx_a: SecurifyCheckResult | None
+    securify_tx_b: SecurifyCheckResult | None
     elapsed_ms: int
 
 
-def trace_tod(args: TraceArgs) -> TraceResult:
+def check_candidate_properties(args: CheckPropertiesArgs):
     error = None
-    tx_a, tx_b = args.transaction_hashes
-    id = f"{tx_a}_{tx_b}"
+    gain_and_loss = None
+    securify_tx_a = None
+    securify_tx_b = None
 
     with StopWatch() as stopwatch:
         global checker
         assert checker is not None
+        tx_a, tx_b = args.transaction_hashes
         try:
-            output_dir = args.traces_dir / id
-            output_dir.mkdir(exist_ok=True)
-            traces_normal_dir = output_dir / "actual"
-            traces_reverse_dir = output_dir / "reverse"
-            traces_normal_dir.mkdir(exist_ok=True)
-            traces_reverse_dir.mkdir(exist_ok=True)
+            analyzer = CurrencyChangesJSTracer()
+            js_tracer, config = analyzer.get_js_tracer()
+            traces = checker.js_trace_scenarios(tx_a, tx_b, js_tracer, config)
+            currency_changes = analyzer.process_traces(traces)
 
-            with open(output_dir / "metadata.json", "w") as metadata_file:
-                tx_a_data = checker._tx_block_mapper.get_transaction(tx_a)
-                tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
-                tx_a_data["value"] = hex(tx_a_data["value"])  # type: ignore
-                tx_b_data["value"] = hex(tx_b_data["value"])  # type: ignore
-                metadata = {
-                    "id": id,
-                    "transactions": {
-                        tx_a: checker._tx_block_mapper.get_transaction(tx_a),
-                        tx_b: checker._tx_block_mapper.get_transaction(tx_b),
-                    },
-                    "transactions_order": [tx_a, tx_b],
-                }
-                json.dump(metadata, metadata_file)
+            tx_a_data = checker._tx_block_mapper.get_transaction(tx_a)
+            tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
 
-            traces = checker.trace_both_scenarios(tx_a, tx_b)
-            trace_normal_b, trace_reverse_b, trace_normal_a, trace_reverse_a = traces
-
-            with open(traces_normal_dir / f"{tx_a}.json", "w") as f:
-                json.dump(trace_normal_a, f)
-            with open(traces_reverse_dir / f"{tx_a}.json", "w") as f:
-                json.dump(trace_reverse_a, f)
-            with open(traces_normal_dir / f"{tx_b}.json", "w") as f:
-                json.dump(trace_normal_b, f)
-            with open(traces_reverse_dir / f"{tx_b}.json", "w") as f:
-                json.dump(trace_reverse_b, f)
-
+            gain_and_loss = check_gain_and_loss_properties(
+                changes_normal=[
+                    *currency_changes.tx_a_normal,
+                    *currency_changes.tx_b_normal,
+                ],
+                changes_reverse=[
+                    *currency_changes.tx_a_reverse,
+                    *currency_changes.tx_b_reverse,
+                ],
+                accounts={
+                    "attacker_eoa": tx_a_data["from"],
+                    "attacker_bot": tx_a_data["to"],
+                    "victim": tx_b_data["from"],
+                },
+            )
+            securify_tx_a = check_securify_properties(
+                currency_changes.tx_a_normal, currency_changes.tx_a_reverse
+            )
+            securify_tx_b = check_securify_properties(
+                currency_changes.tx_b_normal, currency_changes.tx_b_reverse
+            )
         except Exception as e:
             error = e
 
-    return TraceResult(
-        id,
+    return CheckPropertiesResult(
+        args.transaction_hashes,
         error,
+        gain_and_loss,
+        securify_tx_a,
+        securify_tx_b,
         stopwatch.elapsed_ms(),
     )
 
