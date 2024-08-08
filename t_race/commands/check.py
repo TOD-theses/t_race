@@ -214,6 +214,7 @@ def check_properties(
                     "tx_a",
                     "tx_b",
                     "attacker_gain_and_victim_loss",
+                    "attacker_gain_and_victim_loss_approximation",
                     "tod_transfer",
                     "tod_amount",
                     "tod_receiver",
@@ -237,6 +238,7 @@ def check_properties(
                 failure = None
                 if (
                     result.gain_and_loss
+                    and result.gain_and_loss_approximation
                     and result.securify_tx_a
                     and result.securify_tx_b
                     and result.erc20_approval
@@ -246,6 +248,9 @@ def check_properties(
                             "tx_a": tx_a,
                             "tx_b": tx_b,
                             "attacker_gain_and_victim_loss": result.gain_and_loss[
+                                "properties"
+                            ]["attacker_gain_and_victim_loss"],
+                            "attacker_gain_and_victim_loss_approximation": result.gain_and_loss_approximation[
                                 "properties"
                             ]["attacker_gain_and_victim_loss"],
                             "tod_transfer": result.securify_tx_a["properties"][
@@ -350,6 +355,7 @@ class CheckPropertiesResult:
     transaction_hashes: tuple[str, str]
     error: Exception | None
     gain_and_loss: GainAndLossResult | None
+    gain_and_loss_approximation: GainAndLossResult | None
     securify_tx_a: SecurifyCheckResult | None
     securify_tx_b: SecurifyCheckResult | None
     erc20_approval: ERC20ApprovalCheckResult | None
@@ -359,6 +365,7 @@ class CheckPropertiesResult:
 def check_candidate_properties(args: CheckPropertiesArgs):
     error = None
     gain_and_loss = None
+    gain_and_loss_approx = None
     securify_tx_a = None
     securify_tx_b = None
     approval = None
@@ -376,6 +383,15 @@ def check_candidate_properties(args: CheckPropertiesArgs):
             tx_a_data = checker._tx_block_mapper.get_transaction(tx_a)
             tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
 
+            gain_and_loss_approx = check_gain_and_loss_properties(
+                changes_normal=currency_changes.tx_b_normal,
+                changes_reverse=currency_changes.tx_b_reverse,
+                accounts={
+                    "attacker_eoa": tx_a_data["from"],
+                    "attacker_bot": tx_a_data["to"],
+                    "victim": tx_b_data["from"],
+                },
+            )
             gain_and_loss = check_gain_and_loss_properties(
                 changes_normal=[
                     *currency_changes.tx_a_normal,
@@ -407,6 +423,7 @@ def check_candidate_properties(args: CheckPropertiesArgs):
         args.transaction_hashes,
         error,
         gain_and_loss,
+        gain_and_loss_approx,
         securify_tx_a,
         securify_tx_b,
         approval,
