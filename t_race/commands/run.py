@@ -42,12 +42,6 @@ def init_parser_run(parser: ArgumentParser):
     parser.add_argument(
         "--extensive-stats", action="store_true", help="Include time consuming stats"
     )
-    parser.add_argument(
-        "--max-gas",
-        type=int,
-        default=1_000_000,
-        help="Skip tracing and analyzing transactions with a gas value higher than max-gas",
-    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
