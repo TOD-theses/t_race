@@ -4,6 +4,7 @@ from argparse import ArgumentParser
 from importlib.metadata import version
 from os import cpu_count
 from pathlib import Path
+import sys
 
 from t_race.commands.check import init_parser_check
 from t_race.commands.defaults import DEFAULTS
@@ -11,6 +12,10 @@ from t_race.commands.mine import init_parser_mine
 from t_race.commands.run import init_parser_run
 from t_race.commands.stats import init_parser_stats
 from t_race.timing.time_tracker import TimeTracker
+
+
+# do not fail when converting e.g. json stringify a large code represented as int
+sys.set_int_max_str_digits(0)
 
 
 def main():
