@@ -32,6 +32,10 @@ from tod_checker.currency_changes.properties.securify import (
     check_securify_properties,
     SecurifyCheckResult,
 )
+from tod_checker.currency_changes.properties.erc20_approve_after_transfer import (
+    check_erc20_approval_attack,
+    ERC20ApprovalCheckResult,
+)
 from tod_checker.currency_changes.tracer.currency_changes_js_tracer import (
     CurrencyChangesJSTracer,
 )
@@ -213,6 +217,7 @@ def check_properties(
                     "tod_transfer",
                     "tod_amount",
                     "tod_receiver",
+                    "erc20_approval",
                 ],
             )
             writer.writeheader()
@@ -234,6 +239,7 @@ def check_properties(
                     result.gain_and_loss
                     and result.securify_tx_a
                     and result.securify_tx_b
+                    and result.erc20_approval
                 ):
                     writer.writerow(
                         {
@@ -254,6 +260,9 @@ def check_properties(
                                 "TOD_Receiver"
                             ]
                             or result.securify_tx_b["properties"]["TOD_Receiver"],
+                            "erc20_approval": result.erc20_approval["properties"][
+                                "approve_after_transfer"
+                            ],
                         }
                     )
                     details = {
@@ -262,6 +271,7 @@ def check_properties(
                         "gain_and_loss": result.gain_and_loss,
                         "securify_tx_a": result.securify_tx_a,
                         "securify_tx_b": result.securify_tx_b,
+                        "erc20_approval": result.erc20_approval,
                     }
                 if result.error:
                     failure = traceback.format_exception(result.error)
@@ -342,6 +352,7 @@ class CheckPropertiesResult:
     gain_and_loss: GainAndLossResult | None
     securify_tx_a: SecurifyCheckResult | None
     securify_tx_b: SecurifyCheckResult | None
+    erc20_approval: ERC20ApprovalCheckResult | None
     elapsed_ms: int
 
 
@@ -350,6 +361,7 @@ def check_candidate_properties(args: CheckPropertiesArgs):
     gain_and_loss = None
     securify_tx_a = None
     securify_tx_b = None
+    approval = None
 
     with StopWatch() as stopwatch:
         global checker
@@ -359,7 +371,7 @@ def check_candidate_properties(args: CheckPropertiesArgs):
             analyzer = CurrencyChangesJSTracer()
             js_tracer, config = analyzer.get_js_tracer()
             traces = checker.js_trace_scenarios(tx_a, tx_b, js_tracer, config)
-            currency_changes = analyzer.process_traces(traces)
+            currency_changes, events = analyzer.process_traces(traces)
 
             tx_a_data = checker._tx_block_mapper.get_transaction(tx_a)
             tx_b_data = checker._tx_block_mapper.get_transaction(tx_b)
@@ -385,6 +397,9 @@ def check_candidate_properties(args: CheckPropertiesArgs):
             securify_tx_b = check_securify_properties(
                 currency_changes.tx_b_normal, currency_changes.tx_b_reverse
             )
+            approval = check_erc20_approval_attack(
+                events.tx_a_normal, events.tx_b_normal
+            )
         except Exception as e:
             error = e
 
@@ -394,6 +409,7 @@ def check_candidate_properties(args: CheckPropertiesArgs):
         gain_and_loss,
         securify_tx_a,
         securify_tx_b,
+        approval,
         stopwatch.elapsed_ms(),
     )
 
