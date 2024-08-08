@@ -163,7 +163,7 @@ def check(
                     for tx_a, tx_b in transaction_pairs
                 ]
                 for result in tqdm(
-                    p.imap_unordered(check_candidate, process_inputs, chunksize=1),
+                    p.imap_unordered(check_candidate, process_inputs, chunksize=10),
                     total=len(process_inputs),
                     desc="Check TOD",
                 ):
@@ -225,7 +225,7 @@ def check_properties(
             process_inputs = [CheckPropertiesArgs((tx_a, tx_b)) for tx_a, tx_b in tods]
             for result in tqdm(
                 p.imap_unordered(
-                    check_candidate_properties, process_inputs, chunksize=1
+                    check_candidate_properties, process_inputs, chunksize=10
                 ),
                 total=len(process_inputs),
                 desc="Check properties",
