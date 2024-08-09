@@ -104,6 +104,7 @@ def run_properties(args: Namespace, time_tracker: TimeTracker, checker: TodCheck
         args.base_dir / DEFAULTS.TOD_CHECK_CSV_PATH,
         args.base_dir / DEFAULTS.TOD_PROPERTIES_CSV_PATH,
         args.base_dir / DEFAULTS.TOD_PROPERTIES_JSONL_PATH,
+        False,
         args.max_workers,
         time_tracker,
     )

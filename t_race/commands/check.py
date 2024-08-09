@@ -70,6 +70,11 @@ def init_parser_check(parser: ArgumentParser):
         default=DEFAULTS.TOD_METHOD,
     )
     parser.add_argument(
+        "--check-props-for-all",
+        action="store_true",
+        help="Check TOD properties for all TOD candidates, not only those verified as TOD",
+    )
+    parser.add_argument(
         "--results-csv",
         type=Path,
         default=DEFAULTS.TOD_CHECK_CSV_PATH,
@@ -125,6 +130,7 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
             tod_check_results_file_path,
             tod_properties_results_file_path,
             tod_properties_details_file_path,
+            args.check_props_for_all,
             args.max_workers,
             time_tracker,
         )
@@ -196,13 +202,17 @@ def check_properties(
     tod_check_results_path: Path,
     tod_properties_path: Path,
     tod_properties_details_path: Path,
+    check_props_for_all: bool,
     max_workers: int,
     time_tracker: TimeTracker,
 ):
     global checker
     checker = checker_param
 
-    tods = load_tod_transactions(tod_check_results_path)
+    if check_props_for_all:
+        tods = load_tod_candidates(tod_check_results_path)
+    else:
+        tods = load_tod_transactions(tod_check_results_path)
 
     with ThreadPool(max_workers) as p:
         with open(tod_properties_path, "w", newline="") as csv_file, open(
