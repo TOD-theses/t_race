@@ -424,7 +424,7 @@ def check_candidate_properties(args: CheckPropertiesArgs):
                 currency_changes.tx_b_normal, currency_changes.tx_b_reverse
             )
             approval = check_erc20_approval_attack(
-                events.tx_a_normal, events.tx_b_normal
+                events.tx_a_normal, events.tx_b_normal, events.tx_b_reverse
             )
         except Exception as e:
             error = e
