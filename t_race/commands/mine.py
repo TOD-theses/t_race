@@ -14,6 +14,7 @@ from tod_attack_miner.db.db import DB, EvaluationCandidate
 from tod_attack_miner.db.filters import (
     get_filters_except_duplicate_limits,
     get_filters_duplicate_limits,
+    get_filters_up_to_indirect_dependencies,
 )
 
 from t_race.commands.check import load_tod_candidates
@@ -95,6 +96,11 @@ def init_parser_mine(parser: ArgumentParser):
         default=DEFAULTS.TOD_MINING_EVALUATION_CSV_PATH,
         help="See --evaluate-candidates-csv",
     )
+    parser.add_argument(
+        "--extract-indirect-dependencies",
+        action="store_true",
+        help="For the evaluation candidates, extract the indirect dependencies and stop further mining",
+    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
@@ -107,6 +113,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
     output_stats_path = args.base_dir / args.output_stats_path
     evaluation_candidates_csv: Path | None = args.evaluate_candidates_csv
     evaluation_csv = args.base_dir / args.evaluation_csv
+    extract_indirect_dependencies: bool = args.extract_indirect_dependencies
 
     assert (
         not evaluation_candidates_csv or evaluation_candidates_csv.exists()
@@ -127,6 +134,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
             args.quick_stats,
             evaluation_candidates_csv,
             evaluation_csv,
+            extract_indirect_dependencies,
             time_tracker,
         )
 
@@ -142,6 +150,7 @@ def mine(
     quick_stats: bool,
     evaluate_candidates_csv_path: Path | None,
     evaluation_csv_path: Path,
+    extract_indirect_dependencies: bool,
     time_tracker: TimeTracker,
 ):
     with psycopg.connect(conn_str) as conn:
@@ -174,9 +183,17 @@ def mine(
                 evaluation_candidates = load_tod_candidates(
                     evaluate_candidates_csv_path
                 )
-                results = miner.evaluate_candidates(filters, evaluation_candidates)
-                print(f"Saving evaluation results to {evaluation_csv_path}")
-                save_evaluation_results(evaluation_csv_path, results)
+                if extract_indirect_dependencies:
+                    filters = get_filters_up_to_indirect_dependencies(window_size)
+                    results = miner.get_indirect_dependencies(
+                        filters, evaluation_candidates
+                    )
+                    print(f"Saving indirect dependencies to {evaluation_csv_path}")
+                    save_indirect_dependencies(evaluation_csv_path, results)
+                else:
+                    results = miner.evaluate_candidates(filters, evaluation_candidates)
+                    print(f"Saving evaluation results to {evaluation_csv_path}")
+                    save_evaluation_results(evaluation_csv_path, results)
             else:
                 miner.filter_candidates(filters)
             print(f"Reduced to {miner.count_candidates()} TOD candidates")
@@ -224,5 +241,22 @@ def save_evaluation_results(
                 "filtered_by": c["filter"] or "",
             }
             for c in results
+        ]
+        csv_writer.writerows(rows)
+
+
+def save_indirect_dependencies(
+    results_csv_path: Path, results: Iterable[tuple[str, str, str]]
+):
+    with open(results_csv_path, "w") as f:
+        csv_writer = csv.DictWriter(f, ["tx_a", "tx_b", "path"])
+        csv_writer.writeheader()
+        rows = [
+            {
+                "tx_a": tx_a,
+                "tx_b": tx_b,
+                "path": path,
+            }
+            for tx_a, tx_b, path in results
         ]
         csv_writer.writerows(rows)

@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from collections import defaultdict
 import csv
 from dataclasses import dataclass
 from importlib.metadata import version
@@ -70,6 +71,17 @@ def init_parser_check(parser: ArgumentParser):
         default=DEFAULTS.TOD_METHOD,
     )
     parser.add_argument(
+        "--check-indirect-dependencies",
+        action="store_true",
+        help="Check a CSV of indirect dependencies",
+    )
+    parser.add_argument(
+        "--check-indirect-dependencies-csv",
+        type=Path,
+        default=DEFAULTS.INDIRECT_DEPENDENCIES_CSV_PATH,
+        help="Path where the check results for indirect dependencies should be stored",
+    )
+    parser.add_argument(
         "--check-props-for-all",
         action="store_true",
         help="Check TOD properties for all TOD candidates, not only those verified as TOD",
@@ -110,8 +122,24 @@ def check_command(args: Namespace, time_tracker: TimeTracker):
         args.base_dir / args.properties_details_jsonl
     )
     tod_method = args.tod_method
+    should_check_indirect_dependencies: bool = args.check_indirect_dependencies
+    indirect_dependencies_path: Path = (
+        args.base_dir / args.check_indirect_dependencies_csv
+    )
 
     checker = create_checker(args.provider)
+
+    if should_check_indirect_dependencies:
+        check_indirect_dependencies(
+            checker,
+            transactions_csv_path,
+            tod_check_results_file_path,
+            tod_check_details_file_path,
+            indirect_dependencies_path,
+            args.max_workers,
+            time_tracker,
+        )
+        return
 
     with time_tracker.task(("check",)):
         check(
@@ -299,6 +327,98 @@ def check_properties(
                 details_file.write(json.dumps(details_obj) + "\n")
 
 
+def check_indirect_dependencies(
+    checker_param: TodChecker,
+    tod_candidates_path: Path,
+    tod_check_results_path: Path,
+    tod_check_details_path: Path,
+    indirect_dependencies_results_path: Path,
+    max_workers: int,
+    time_tracker: TimeTracker,
+):
+    global checker
+    checker = checker_param
+    indirect_dependencies = load_indirect_dependencies(tod_candidates_path)
+    transaction_pairs = set(
+        (tx_a, tx_x) for _, _, (tx_a, tx_x, _) in indirect_dependencies
+    )
+    transaction_pairs.update(
+        set((tx_x, tx_b) for _, _, (_, tx_x, tx_b) in indirect_dependencies)
+    )
+    tod_candidates = set((tx_a, tx_b) for tx_a, tx_b, _ in indirect_dependencies)
+
+    blocks = set()
+    with time_tracker.task(("check", "download transactions")):
+        for tx in tqdm(set(flatten(transaction_pairs)), desc="Fetch transactions"):
+            blocks.add(checker.download_data_for_transaction(tx))
+    with time_tracker.task(("check", "fetch state changes")):
+        for block in tqdm(blocks, desc="Fetch state changes"):
+            checker.download_data_for_block(block)
+
+    with time_tracker.task(("check", "check")):
+        with open(tod_check_results_path, "w", newline="") as csv_file, open(
+            tod_check_details_path, "w"
+        ) as details_file:
+            writer = csv.DictWriter(csv_file, ["tx_a", "tx_b", "result"])
+            writer.writeheader()
+            with ThreadPool(max_workers) as p:
+                process_inputs = [
+                    CheckArgs((tx_a, tx_b), "overall")
+                    for tx_a, tx_b in transaction_pairs
+                ]
+                for result in tqdm(
+                    p.imap_unordered(check_candidate, process_inputs, chunksize=10),
+                    total=len(process_inputs),
+                    desc="Check TOD",
+                ):
+                    time_tracker.save_time_ms(
+                        ("check", "check", result.id), result.elapsed_ms
+                    )
+                    tx_a, tx_b = result.id.split("_")
+                    writer.writerow(
+                        {
+                            "tx_a": tx_a,
+                            "tx_b": tx_b,
+                            "result": result.result,
+                        }
+                    )
+                    details: dict = {
+                        "tx_a": tx_a,
+                        "tx_b": tx_b,
+                        "details": None,
+                        "failure": None,
+                    }
+                    if result.details:
+                        details["details"] = result.details.as_dict()
+                    if result.result not in ("TOD", "not TOD"):
+                        details["failure"] = result.result
+                    details_file.write(json.dumps(details) + "\n")
+
+    tods = load_tod_transactions(tod_check_results_path)
+    dependent_paths: dict[tuple[str, str], list[str]] = defaultdict(list)
+
+    for tx_a, tx_b, path in indirect_dependencies:
+        tx_x = path[1]
+        if (tx_a, tx_x) in tods and (tx_x, tx_b) in tods:
+            dependent_paths[(tx_a, tx_b)].append(tx_x)
+
+    with open(indirect_dependencies_results_path, "w", newline="") as csv_file:
+        writer = csv.DictWriter(
+            csv_file, ["tx_a", "tx_b", "indirect_dependency", "witnesses"]
+        )
+        writer.writeheader()
+        for tx_a, tx_b in tod_candidates:
+            paths = dependent_paths[(tx_a, tx_b)]
+            writer.writerow(
+                {
+                    "tx_a": tx_a,
+                    "tx_b": tx_b,
+                    "indirect_dependency": len(paths) > 0,
+                    "witnesses": "|".join(paths),
+                }
+            )
+
+
 def create_checker(provider: str):
     rpc = RPC(provider, OverridesFormatter("old Erigon"))
     state_changes_fetcher = StateChangesFetcher(rpc)
@@ -451,6 +571,14 @@ def load_tod_transactions(csv_path: Path) -> Sequence[tuple[str, str]]:
     with open(csv_path, "r", newline="") as f:
         reader = csv.DictReader(f)
         return [(row["tx_a"], row["tx_b"]) for row in reader if row["result"] == "TOD"]
+
+
+def load_indirect_dependencies(
+    csv_path: Path,
+) -> Sequence[tuple[str, str, Sequence[str]]]:
+    with open(csv_path, "r", newline="") as f:
+        reader = csv.DictReader(f)
+        return [(row["tx_a"], row["tx_b"], row["path"].split("|")) for row in reader]
 
 
 def flatten(nested_list: Iterable[Iterable]) -> list:
