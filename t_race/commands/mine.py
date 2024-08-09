@@ -105,7 +105,12 @@ def init_parser_mine(parser: ArgumentParser):
 def mine_command(args: Namespace, time_tracker: TimeTracker):
     output_path = args.base_dir / args.output_path
     output_stats_path = args.base_dir / args.output_stats_path
+    evaluation_candidates_csv: Path | None = args.evaluate_candidates_csv
     evaluation_csv = args.base_dir / args.evaluation_csv
+
+    assert (
+        not evaluation_candidates_csv or evaluation_candidates_csv.exists()
+    ), f"Could not find evaluation candidates: {evaluation_candidates_csv.absolute()}"
 
     conn_str = f"user={args.postgres_user} password={args.postgres_password} host={args.postgres_host} port={args.postgres_port}"
     print("Connecting to postgres: ", conn_str)
@@ -120,7 +125,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
             conn_str,
             args.provider,
             args.quick_stats,
-            args.evaluate_candidates_csv,
+            evaluation_candidates_csv,
             evaluation_csv,
             time_tracker,
         )
