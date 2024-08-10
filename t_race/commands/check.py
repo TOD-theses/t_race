@@ -6,7 +6,6 @@ from importlib.metadata import version
 import json
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
-import traceback
 from typing import Iterable, Literal, Sequence
 
 from tqdm import tqdm
@@ -217,6 +216,7 @@ def check(
                         "tx_b": tx_b,
                         "details": None,
                         "failure": None,
+                        "error": result.error and repr(result.error),
                     }
                     if result.details:
                         details["details"] = result.details.as_dict()
@@ -273,7 +273,6 @@ def check_properties(
                 time_tracker.save_time_ms(("properties", id), result.elapsed_ms)
 
                 details = None
-                failure = None
                 if (
                     result.gain_and_loss
                     and result.gain_and_loss_approximation
@@ -316,13 +315,11 @@ def check_properties(
                         "securify_tx_b": result.securify_tx_b,
                         "erc20_approval": result.erc20_approval,
                     }
-                if result.error:
-                    failure = traceback.format_exception(result.error)
                 details_obj: dict = {
                     "tx_a": tx_a,
                     "tx_b": tx_b,
                     "details": details,
-                    "failure": failure,
+                    "error": result.error and repr(result.error),
                 }
                 details_file.write(json.dumps(details_obj) + "\n")
 
@@ -387,6 +384,7 @@ def check_indirect_dependencies(
                         "tx_b": tx_b,
                         "details": None,
                         "failure": None,
+                        "error": result.error and repr(result.error),
                     }
                     if result.details:
                         details["details"] = result.details.as_dict()
@@ -437,12 +435,15 @@ class CheckArgs:
 class CheckResult:
     id: str
     result: TODResult
+    error: Exception | None
     details: TODCheckResult | None
     elapsed_ms: int
 
 
 def check_candidate(args: CheckArgs):
     res = None
+    error = None
+    result: TODResult | None = None
 
     with StopWatch() as stopwatch:
         global checker
@@ -466,10 +467,15 @@ def check_candidate(args: CheckArgs):
                 result = "insufficient ether replay error"
             else:
                 result = "error"
+                error = e
 
+    if not result:
+        result = "error"
+        error = Exception("<no result given>")
     return CheckResult(
         f"{args.transaction_hashes[0]}_{args.transaction_hashes[1]}",
-        result,  # type: ignore
+        result,
+        error,
         res,
         stopwatch.elapsed_ms(),
     )
