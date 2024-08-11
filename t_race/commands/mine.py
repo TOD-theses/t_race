@@ -101,6 +101,11 @@ def init_parser_mine(parser: ArgumentParser):
         action="store_true",
         help="For the evaluation candidates, extract the indirect dependencies and stop further mining",
     )
+    parser.add_argument(
+        "--extract-limit-representatives",
+        action="store_true",
+        help="For the evaluation candidates, extract representatives for the candidates removed by the duplicate limits",
+    )
     parser.add_argument("--postgres-user", type=str, default="postgres")
     parser.add_argument("--postgres-password", type=str, default="password")
     parser.add_argument("--postgres-host", type=str, default="localhost")
@@ -114,6 +119,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
     evaluation_candidates_csv: Path | None = args.evaluate_candidates_csv
     evaluation_csv = args.base_dir / args.evaluation_csv
     extract_indirect_dependencies: bool = args.extract_indirect_dependencies
+    extract_limit_representatives: bool = args.extract_limit_representatives
 
     assert (
         not evaluation_candidates_csv or evaluation_candidates_csv.exists()
@@ -135,6 +141,7 @@ def mine_command(args: Namespace, time_tracker: TimeTracker):
             evaluation_candidates_csv,
             evaluation_csv,
             extract_indirect_dependencies,
+            extract_limit_representatives,
             time_tracker,
         )
 
@@ -151,6 +158,7 @@ def mine(
     evaluate_candidates_csv_path: Path | None,
     evaluation_csv_path: Path,
     extract_indirect_dependencies: bool,
+    extract_limit_representatives: bool,
     time_tracker: TimeTracker,
 ):
     with psycopg.connect(conn_str) as conn:
@@ -190,6 +198,19 @@ def mine(
                     )
                     print(f"Saving indirect dependencies to {evaluation_csv_path}")
                     save_indirect_dependencies(evaluation_csv_path, results)
+                elif extract_limit_representatives:
+                    assert (
+                        duplicates_limit
+                    ), "Cannot extract limit representatives without duplicates limit"
+                    results = miner.get_limit_representatives(
+                        get_filters_except_duplicate_limits(window_size),
+                        get_filters_duplicate_limits(duplicates_limit),
+                        evaluation_candidates,
+                    )
+                    print(
+                        f"Saving duplicate limit representatives to {evaluation_csv_path}"
+                    )
+                    save_duplicate_limit_representatives(evaluation_csv_path, results)
                 else:
                     results = miner.evaluate_candidates(filters, evaluation_candidates)
                     print(f"Saving evaluation results to {evaluation_csv_path}")
@@ -258,5 +279,24 @@ def save_indirect_dependencies(
                 "path": path,
             }
             for tx_a, tx_b, path in results
+        ]
+        csv_writer.writerows(rows)
+
+
+def save_duplicate_limit_representatives(
+    results_csv_path: Path,
+    results: Iterable[tuple[tuple[str, str], bool, Iterable[tuple[str, str]]]],
+):
+    with open(results_csv_path, "w") as f:
+        csv_writer = csv.DictWriter(f, ["tx_a", "tx_b", "covered", "representatives"])
+        csv_writer.writeheader()
+        rows = [
+            {
+                "tx_a": tx_a,
+                "tx_b": tx_b,
+                "covered": covered,
+                "representatives": "|".join(f"{a}-{b}" for a, b in representatives),
+            }
+            for (tx_a, tx_b), covered, representatives in results
         ]
         csv_writer.writerows(rows)

@@ -83,6 +83,7 @@ def run_mining(args: Namespace, time_tracker: TimeTracker):
         None,
         Path(),
         False,
+        False,
         time_tracker,
     )
 
