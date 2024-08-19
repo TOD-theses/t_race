@@ -1,5 +1,6 @@
 # analysis output
 out/
+rq1-3_search.csv
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
