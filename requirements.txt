@@ -3,5 +3,5 @@ tqdm==4.66.1
 typing_extensions==4.10.0
 requests==2.31.0
 tod_attack_miner @ git+https://github.com/TOD-theses/tod_attack_miner@7f24f98107bb419e6decf9eb3a8aaa92513a0e76
-tod_checker @ git+https://github.com/TOD-theses/tod_checker@82e32bb0db4024b535ed8383cbc2f6fb982e1a47
+tod_checker @ git+https://github.com/TOD-theses/tod_checker@94b9b4ebb37ad110a3befcf9776dc3abcc82a618
 t_race_stats @ git+https://github.com/TOD-theses/t_race_stats@7cbbc3375d52de347933a155e11de679fbeabbe4
